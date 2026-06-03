@@ -13,39 +13,38 @@ Legend: ⚠️ = safety-critical · 🔧 = needed for correct operation · 📋 
 Control path: NKTPDLL Interbus SDK (`C:\Users\Public\Documents\NKT Photonics\SDK`),
 wrapper `NKTP_DLL.py`. Driver: `spectrometer/drivers/laser_nkt.py`.
 
-Identified as the NKT **"Aeropulse mainboard" (module type `0x9D`)** — confirmed
-register map from the SDK `Register Files/9D.txt`. The driver now consolidates
-**all** controls into one connection (one `openPorts`), since the Interbus
-won't allow a second process to open the same port.
+**CONFIRMED:** module **type `0x95` "Origami XPS"** at **COM6** (FTDI), address
+15 (`tests/discover_nkt.py`). Register map verified live (`tests/origami_status.py`)
+against SDK `Register Files/95.txt`. Driver: `OrigamiXPS` in `laser_nkt.py`
+(one connection; Interbus forbids a 2nd opener of the port).
 
-Register map in use (preset `AEROPULSE_MAINBOARD` in `laser_nkt.py`):
-`0x30` emission (0=off/1=seed/2=preamp/3=booster), `0x34` pulse-picker ratio,
-`0x37` output level (0.1 %), `0x32` interlock, `0x66` status, `0x67` error.
+Register map (Origami XPS): `0x30` FSM target state [1,3,5,6] (emission is a
+state machine; **state 1 = OFF confirmed**), `0x34` internal shutter [0,1],
+`0x35` rep-rate index [0-12] (**index 0 = 50 kHz confirmed**), `0x36`
+frequency-division pulse picker [1-1,000,000] (U32), `0x05` relative power
+[0-4000], `0x02/0x03` actual PRR (read), `0x66` status (bit0=Emission On),
+`0x32` interlock, `0x67` error.
 
 | ✓ | Item | Why | Current value | Where to set |
 |---|------|-----|---------------|--------------|
-| ☐ | ⚠️ **Confirm module is type `0x9D`** when connected | Selects the whole register map | assumed `0x9D` (auto-detected on open) | `NKTLaser(regmap=...)` presets |
-| ☐ | ⚠️ **Emission OFF = `0`** (verified-safe) | E-stop must kill the beam | `0x00` (consistent across NKT products) | `NKTRegisterMap.emission_off` |
-| ☐ | ⚠️ **Emission ON stage** (booster=3?) | `enable()` must start full emission | `0x03` (booster, from `9D.txt`) | `NKTRegisterMap.emission_on` |
-| ☐ | ⚠️ **Module address** on the Interbus | All reads/writes target this | `15` fallback; **auto-detected by type on open** | auto / `regmap.address` |
-| ☐ | 🔧 **Amplifier rep-rate register** | Discrete rep rate (50-1000 kHz, default 50) is a *separate* control from the pulse picker; register not yet identified | `rep_rate_register=None` → GUI greys the control; `set_repetition_rate_hz` raises until set | `NKTRegisterMap.rep_rate_register` |
-| ☐ | 🔧 **Laser COM port** | Which port the Origami enumerates as | auto-discover (`None`); NKT examples used `COM6` | `build_devices(laser_port=...)` |
-| ☐ | 🔧 **Confirm Interbus vs PubOrigamiLib** | Does the generic scan see the Origami, or must we use `PubOrigamiLib.dll`? | assumes generic Interbus | run `tests/discover_nkt.py` with laser powered |
-| ☐ | 📋 **Power register `0x37`** scaling (0.1 %/LSB) | Power set/read | `0x37`, 0.1 %/LSB | `NKTRegisterMap.power_register` |
-| ☐ | 📋 **Pulse-picker range** | GUI allows 1/1 .. 1/1,000,000 (reg `0x34`) | 1 .. 1,000,000 | `ShutterLaserPanel` spinbox |
-| ☐ | 📋 **Rep-rate values** | Discrete: 50,100,200..1000 kHz, default 50 | `STANDARD_REP_RATES_HZ` in `drivers/base.py` | confirm vs Origami |
-| ☐ | 📋 **Sync/analog channel** | Currently unused; do we ever read it? | not read | future `read_sync()` hook |
+| ☑ | ⚠️ **Module type / port / address** | Selects register map | `0x95` @ COM6 addr 15 (auto-detected) | confirmed |
+| ☑ | ⚠️ **Emission OFF** | E-stop kills the beam | shutter `0x34`=0 **and** FSM `0x30`=1 (both confirmed) | `OrigamiXPS.disable()` |
+| ☐ | ⚠️ **Emission RUN FSM state** | `enable()` must reach full emission | `FSM_RUN=6` (valid [1,3,5,6]) — **CONFIRM vs 3/5** | `OrigamiXPS.FSM_RUN` |
+| ☐ | 🔧 **Power full-scale** (`0x05`=4000 ⇒ 100 %?) | Correct power % scaling | `POWER_FULL_SCALE=4000` — confirm | `OrigamiXPS.POWER_FULL_SCALE` |
+| ☐ | 🔧 **Rep-rate index→kHz table** | Map indices 1-10 to 100-1000 kHz (index 0=50 confirmed) | assumed 1=100…10=1000 | `OrigamiXPS.REP_RATE_INDEX_HZ` |
+| ☑ | 📋 **Pulse picker** | Frequency-division factor, 1/1..1/1,000,000 | reg `0x36` (U32) | confirmed |
+| ☐ | 📋 **Sync/analog channel** | Currently unused | not read | future `read_sync()` hook |
 
-**Controls now in the driver** (`NKTLaser`): `enable`/`disable` (E-stop),
-`set_emission_stage`, `set_power_percent`/`read_power_percent`,
-`set_pulse_picker_ratio`/`read_pulse_picker_ratio`,
-`set_repetition_rate_hz`/`read_repetition_rate_hz` (needs base rate),
-`read_status_bits`, `reset_interlock`.
+**Controls in `OrigamiXPS`:** `enable` (FSM→RUN + open shutter) / `disable`
+(close shutter + FSM→OFF, the E-stop), `set/read_power_percent`,
+`set/read_pulse_picker_ratio` (U32), discrete `set/read_repetition_rate_hz`
+(via index), `read_status_bits`, `reset_interlock`, `emission_stage`.
 
-**Action when laser is powered + connected:** run `python tests/discover_nkt.py`
-→ confirm it reports module type `0x9D` and its address; then bench-verify
-`enable`/`disable` toggle emission **with no experiment running** before
-trusting the E-stop.
+**To confirm the 3 remaining unknowns:** in NKT CONTROL, note which target
+state runs emission (→ `FSM_RUN`); set power to a known % and read `0x05`
+(→ scaling); step the rep rate and re-run `tests/origami_status.py` to read
+`0x03` per index (→ index table). Then bench-verify `enable`/`disable` with the
+beam safely dumped before trusting the E-stop.
 
 ---
 

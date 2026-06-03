@@ -7,6 +7,13 @@ Run:  python tests/discover_nkt.py
 """
 from __future__ import annotations
 
+import os
+import sys
+
+# Allow running directly (`python tests/discover_nkt.py`) by putting the repo
+# root on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import serial.tools.list_ports
 
 from spectrometer.drivers.laser_nkt import NKTLaser

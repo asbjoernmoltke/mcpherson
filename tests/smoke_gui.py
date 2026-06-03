@@ -7,7 +7,11 @@ event loop); invoked directly by the test runner command.
 """
 from __future__ import annotations
 
+import os
 import sys
+
+# Allow running directly by putting the repo root on sys.path.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication

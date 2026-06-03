@@ -332,3 +332,231 @@ class NKTLaser(LaserDriver):
             return ", ".join(parts)
         except Exception as exc:  # pragma: no cover
             return f"Error: {exc}"
+
+
+# Origami XPS status-bit meanings (register 0x66, U32).
+_ORIGAMI_STATUS_BITS = {
+    0: "emission_on", 1: "main_interlock_open", 2: "switching_prr",
+    3: "aux_interlock_open", 5: "supply_voltage_low", 6: "temp_out_of_range",
+    14: "module_error", 15: "error_present",
+}
+
+
+class OrigamiXPS(LaserDriver):
+    """NKT Origami XPS regenerative-amplifier femtosecond laser (module 0x95).
+
+    Confirmed live from the unit (read-only dump): emission is a state machine
+    (``0x30`` target, state 1 = OFF), a separate internal shutter (``0x34``),
+    a discrete rep-rate index (``0x35``; index 0 = 50 kHz), and a U32
+    frequency-division pulse picker (``0x36``, 1..1,000,000).
+
+    SAFETY: ``disable()`` closes the internal shutter (0x34=0) AND sets the FSM
+    target to OFF (0x30=1) -- both verified as the standby/closed values, so
+    the E-stop path is unambiguous. ``enable()`` targets the RUN state, which
+    is still to be CONFIRMED against the Origami manual (valid targets
+    [1,3,5,6]); set ``FSM_RUN`` accordingly. Power full-scale (0x05 = 4000 =>
+    100 %) and the rep-rate index->Hz table beyond index 0 are best-effort and
+    flagged for confirmation.
+    """
+
+    MODULE_TYPE = 0x95
+    REG_FSM_STATE = 0x01      # U8 (read) current state
+    REG_OUTPUT_PRR = 0x03     # U32 Hz (read) actual output rep rate
+    REG_REL_POWER = 0x05      # U16 [0-4000] relative output power
+    REG_FSM_TARGET = 0x30     # U8 target state [1,3,5,6]
+    REG_INTERLOCK = 0x32      # H16 (>0 = reset)
+    REG_SHUTTER = 0x34        # U8 [0=closed,1=open]
+    REG_PRR_INDEX = 0x35      # U8 [0-12] rep-rate selector
+    REG_FREQ_DIV = 0x36       # U32 [1-1000000] pulse picker
+    REG_STATUS = 0x66         # U32 status bits
+
+    FSM_OFF = 1               # CONFIRMED: observed standby/off state
+    FSM_RUN = 6               # TODO confirm against manual (valid [1,3,5,6])
+    POWER_FULL_SCALE = 4000   # raw value for 100 % (TODO confirm)
+
+    # index -> Hz. Index 0 = 50 kHz is CONFIRMED from the unit; the rest follow
+    # the stated allowed set (50,100,200..1000 kHz) and need confirmation.
+    REP_RATE_INDEX_HZ = {0: 50e3, 1: 100e3, 2: 200e3, 3: 300e3, 4: 400e3,
+                         5: 500e3, 6: 600e3, 7: 700e3, 8: 800e3, 9: 900e3,
+                         10: 1000e3}
+
+    def __init__(self, port: Optional[str] = None, *,
+                 sdk_path: str = DEFAULT_SDK_PATH):
+        self.port = port
+        self.address = 15
+        self.sdk_path = sdk_path
+        self._nkt = None
+        self._connected = False
+
+    # --- low-level ----------------------------------------------------
+    def _api(self):
+        if self._nkt is None:
+            self._nkt = _load_nkt(self.sdk_path)
+        return self._nkt
+
+    def _wr(self, fn_name: str, reg: int, value: int, *, what: str,
+            raise_on_fail: bool = True) -> int:
+        nkt = self._api()
+        result = getattr(nkt, fn_name)(self.port, self.address, reg, value, -1)
+        if result != _REG_SUCCESS:
+            msg = "OrigamiXPS %s failed: %s" % (what, nkt.RegisterResultTypes(result))
+            if raise_on_fail:
+                raise RuntimeError(msg)
+            log.error(msg)
+        return result
+
+    def _rd(self, fn_name: str, reg: int):
+        nkt = self._api()
+        result, value = getattr(nkt, fn_name)(self.port, self.address, reg, -1)
+        return value if result == _REG_SUCCESS else None
+
+    def find_modules(self) -> dict[int, int]:
+        nkt = self._api()
+        nkt.openPorts(nkt.getAllPorts(), 1, 0)
+        found: dict[int, int] = {}
+        for portname in [p for p in nkt.getOpenPorts().split(",") if p]:
+            _r, dev_list = nkt.deviceGetAllTypesV2(portname)
+            for addr, dtype in enumerate(dev_list):
+                if dtype != 0 and (self.port is None or portname == self.port):
+                    found[addr] = dtype
+        return found
+
+    # --- lifecycle ----------------------------------------------------
+    def open(self) -> None:
+        nkt = self._api()
+        modules = self.find_modules()
+        open_ports = [p for p in nkt.getOpenPorts().split(",") if p]
+        if self.port is None and open_ports:
+            self.port = open_ports[0]
+        if self.port is None:
+            raise RuntimeError("OrigamiXPS: no NKT port found. Laser powered?")
+        matches = [a for a, t in modules.items() if t == self.MODULE_TYPE]
+        if matches:
+            self.address = matches[0]
+            log.info("OrigamiXPS found at address %d on %s." % (self.address, self.port))
+        else:
+            log.warn("OrigamiXPS: module type 0x95 not found among %s; using "
+                     "address %d." % ({a: hex(t) for a, t in modules.items()},
+                                      self.address))
+        self._connected = True
+        self.disable()  # safety: standby + shutter closed on attach
+        log.info("OrigamiXPS connected; forced to standby (shutter closed).")
+
+    def close(self) -> None:
+        if self._connected:
+            self.disable()
+            try:
+                self._nkt.closePorts(self.port or "")
+            except Exception as exc:  # pragma: no cover
+                log.error("OrigamiXPS closePorts error: %s" % exc)
+        self._connected = False
+        log.info("OrigamiXPS closed.")
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    # --- emission -----------------------------------------------------
+    def enable(self) -> None:
+        """Target the RUN state and open the internal shutter."""
+        self._wr("registerWriteU8", self.REG_FSM_TARGET, self.FSM_RUN,
+                 what="enable(FSM->RUN)")
+        self._wr("registerWriteU8", self.REG_SHUTTER, 1, what="open shutter")
+        log.info("OrigamiXPS: emission RUN requested (FSM=%d)." % self.FSM_RUN)
+
+    def disable(self) -> None:
+        """E-stop fast path: close the internal shutter AND target OFF.
+        Both values are confirmed-safe; best-effort, retried, never raises."""
+        for attempt in range(3):
+            r1 = self._wr("registerWriteU8", self.REG_SHUTTER, 0,
+                          what="close shutter", raise_on_fail=False)
+            r2 = self._wr("registerWriteU8", self.REG_FSM_TARGET, self.FSM_OFF,
+                          what="FSM->OFF", raise_on_fail=False)
+            if r1 == _REG_SUCCESS and r2 == _REG_SUCCESS:
+                log.info("OrigamiXPS: emission OFF (shutter closed, FSM=OFF).")
+                return
+            time.sleep(0.02)
+        log.fatal("OrigamiXPS: FAILED to confirm emission OFF after retries!")
+
+    @property
+    def is_enabled(self) -> bool:
+        status = self._rd("registerReadU32", self.REG_STATUS)
+        return bool(status) and bool(status & 0x1)  # bit 0 = Emission On
+
+    @property
+    def emission_stage(self) -> str:
+        state = self._rd("registerReadU8", self.REG_FSM_STATE)
+        return {1: "off", 3: "standby", 5: "ready", 6: "emitting"}.get(
+            state, "state %s" % state)
+
+    # --- power --------------------------------------------------------
+    def set_power_percent(self, percent: float) -> None:
+        percent = max(0.0, min(100.0, percent))
+        raw = int(round(percent / 100.0 * self.POWER_FULL_SCALE))
+        self._wr("registerWriteU16", self.REG_REL_POWER, raw, what="set_power")
+        log.info("OrigamiXPS: power %.1f %% (raw %d)." % (percent, raw))
+
+    def read_power_percent(self) -> Optional[float]:
+        raw = self._rd("registerReadU16", self.REG_REL_POWER)
+        return None if raw is None else raw / self.POWER_FULL_SCALE * 100.0
+
+    # --- pulse picker (U32 frequency-division factor) -----------------
+    def set_pulse_picker_ratio(self, ratio: int) -> None:
+        if not 1 <= ratio <= 1_000_000:
+            raise ValueError("Pulse-picker ratio must be in 1..1,000,000.")
+        self._wr("registerWriteU32", self.REG_FREQ_DIV, int(ratio),
+                 what="set_pulse_picker")
+        log.info("OrigamiXPS: pulse-picker 1/%d." % ratio)
+
+    def read_pulse_picker_ratio(self) -> Optional[int]:
+        return self._rd("registerReadU32", self.REG_FREQ_DIV)
+
+    # --- repetition rate (discrete index) -----------------------------
+    def allowed_rep_rates_hz(self) -> Optional[tuple[float, ...]]:
+        return tuple(self.REP_RATE_INDEX_HZ[i]
+                     for i in sorted(self.REP_RATE_INDEX_HZ))
+
+    def set_repetition_rate_hz(self, target_hz: float) -> float:
+        # Pick the index whose mapped rate is nearest the requested value.
+        index = min(self.REP_RATE_INDEX_HZ,
+                    key=lambda i: abs(self.REP_RATE_INDEX_HZ[i] - target_hz))
+        self._wr("registerWriteU8", self.REG_PRR_INDEX, index,
+                 what="set_rep_rate_index")
+        applied = self.REP_RATE_INDEX_HZ[index]
+        log.info("OrigamiXPS: rep-rate index %d (%.0f kHz)." % (index, applied / 1e3))
+        return applied
+
+    def read_repetition_rate_hz(self) -> Optional[float]:
+        # Actual output rep rate (Hz), read directly from the amplifier.
+        raw = self._rd("registerReadU32", self.REG_OUTPUT_PRR)
+        return None if raw is None else float(raw)
+
+    # --- status -------------------------------------------------------
+    def read_status_bits(self) -> dict[str, bool]:
+        raw = self._rd("registerReadU32", self.REG_STATUS)
+        if raw is None:
+            return {}
+        return {name: bool(raw & (1 << bit))
+                for bit, name in _ORIGAMI_STATUS_BITS.items()}
+
+    def reset_interlock(self) -> None:
+        self._wr("registerWriteU16", self.REG_INTERLOCK, 1, what="reset_interlock")
+        log.info("OrigamiXPS: interlock reset requested.")
+
+    def get_status(self) -> str:
+        if not self._connected:
+            return "Disconnected"
+        try:
+            parts = [self.emission_stage]
+            power = self.read_power_percent()
+            if power is not None:
+                parts.append("%.0f%%" % power)
+            ratio = self.read_pulse_picker_ratio()
+            if ratio:
+                parts.append("PP 1/%d" % ratio)
+            rate = self.read_repetition_rate_hz()
+            if rate:
+                parts.append("%.0f kHz" % (rate / 1e3))
+            return ", ".join(parts)
+        except Exception as exc:  # pragma: no cover
+            return f"Error: {exc}"
