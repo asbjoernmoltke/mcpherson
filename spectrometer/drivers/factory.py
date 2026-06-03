@@ -37,8 +37,12 @@ class DeviceBundle:
                 log.error("Error closing %s: %s" % (type(dev).__name__, exc))
 
 
-def build_devices(dummy: bool = False, *, grating_port: str = "COM5") -> DeviceBundle:
-    """Construct all drivers. ``dummy=True`` returns an all-simulated bundle."""
+def build_devices(dummy: bool = False, *, grating_port: str = "COM5",
+                  laser_port: str | None = None) -> DeviceBundle:
+    """Construct all drivers. ``dummy=True`` returns an all-simulated bundle.
+
+    ``laser_port`` is the NKT laser's COM port; ``None`` auto-discovers it.
+    """
     if dummy:
         from .andor_camera import DummyCamera
         from .laser import DummyLaser
@@ -55,20 +59,20 @@ def build_devices(dummy: bool = False, *, grating_port: str = "COM5") -> DeviceB
             vacuum=DummyVacuum(),
         )
 
-    # Real hardware. Shutter/laser/vacuum concretes are still TBD, so they
-    # fall back to dummies until that hardware is chosen (see plan open items).
+    # Real hardware. The NKT laser is now real; shutter/vacuum concretes are
+    # still TBD, so they fall back to dummies (see plan open items).
     from .andor_camera import AndorCamera
-    from .laser import DummyLaser
+    from .laser_nkt import NKTLaser
     from .mcpherson import MP_789A_4
     from .shutter import DummyShutter
     from .vacuum import DummyVacuum
 
-    log.warn("Building REAL device bundle; shutter/laser/vacuum are still "
-             "simulated until that hardware is selected.")
+    log.warn("Building REAL device bundle; shutter/vacuum are still simulated "
+             "until that hardware is selected.")
     return DeviceBundle(
         camera=AndorCamera(),
         grating=MP_789A_4(grating_port),
         shutter=DummyShutter(),
-        laser=DummyLaser(),
+        laser=NKTLaser(laser_port),
         vacuum=DummyVacuum(),
     )

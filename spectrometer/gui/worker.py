@@ -50,10 +50,21 @@ class HardwareWorker(QObject):
     # --- status polling (runs in this thread) -------------------------
     @pyqtSlot()
     def start_status_polling(self, interval_ms: int = 500) -> None:
-        self._timer = QTimer()
+        # Parent the timer to the worker so it shares the worker's thread
+        # affinity and is destroyed with it.
+        self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll_status)
         self._timer.start(interval_ms)
         self._poll_status()
+
+    @pyqtSlot()
+    def shutdown(self) -> None:
+        """Stop the status timer from within the worker thread (called via a
+        blocking queued connection before the thread quits) so Qt never tries
+        to kill the timer from another thread."""
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
 
     def _poll_status(self) -> None:
         s = self.system
@@ -65,6 +76,7 @@ class HardwareWorker(QObject):
                 "temperature": s.camera.temperature,
                 "cooler_on": s.devices.camera.is_cooler_on(),
                 "stable": s.devices.camera.is_temperature_stable(),
+                "cooled": s.camera.is_cooled,
                 "can_acquire": s.safety.can_acquire,
                 "grating": s.grating.status,
                 "position": s.grating.position,
@@ -72,6 +84,14 @@ class HardwareWorker(QObject):
                 "shutter_open": s.shutter.is_open,
                 "laser": s.laser.status,
                 "laser_on": s.laser.is_enabled,
+                "laser_stage": s.laser.emission_stage,
+                "laser_power": s.laser.read_power_percent(),
+                "laser_pp_ratio": s.laser.read_pulse_picker_ratio(),
+                "laser_rep_rate": s.laser.read_repetition_rate_hz(),
+                "laser_supports_power": s.laser.supports_power,
+                "laser_supports_pp": s.laser.supports_pulse_picker,
+                "laser_supports_rep": s.laser.supports_rep_rate,
+                "laser_allowed_rep_rates": s.laser.allowed_rep_rates_hz(),
                 "vacuum": s.vacuum.status,
                 "vacuum_ok": s.vacuum.vacuum_ok,
                 "estopped": s.safety.is_estopped,
@@ -160,3 +180,24 @@ class HardwareWorker(QObject):
             self.system.laser.enable()
         else:
             self.system.laser.disable()
+
+    @pyqtSlot(float)
+    def set_laser_power(self, percent: float) -> None:
+        try:
+            self.system.laser.set_power_percent(percent)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+    @pyqtSlot(int)
+    def set_pulse_picker(self, ratio: int) -> None:
+        try:
+            self.system.laser.set_pulse_picker_ratio(ratio)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+    @pyqtSlot(float)
+    def set_rep_rate(self, hz: float) -> None:
+        try:
+            self.system.laser.set_repetition_rate_hz(hz)
+        except Exception as exc:
+            self.error.emit(str(exc))

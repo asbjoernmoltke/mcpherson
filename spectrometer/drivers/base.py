@@ -16,6 +16,11 @@ from typing import Optional
 
 import numpy as np
 
+# Discrete repetition rates (Hz) selectable on the Origami XP amplifier:
+# 50 kHz, then 100..1000 kHz in 100 kHz steps. Default 50 kHz.
+STANDARD_REP_RATES_HZ: tuple[float, ...] = tuple(
+    r * 1e3 for r in (50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000))
+
 
 class Driver(ABC):
     """Common lifecycle shared by all drivers."""
@@ -199,6 +204,37 @@ class LaserDriver(Driver):
 
     def read_sync(self) -> Optional[float]:
         """Future hook for the analog sync channel. Unused for now."""
+        return None
+
+    # --- optional capabilities (overridden by lasers that support them) ---
+    # Defaults report "unsupported" so the GUI can grey-out controls and the
+    # dummy/simple lasers need not implement them. The NKT driver overrides
+    # all of these.
+    @property
+    def emission_stage(self) -> str:
+        """'off' | 'seed' | 'preamp' | 'booster' (default: on/off only)."""
+        return "booster" if self.is_enabled else "off"
+
+    def set_power_percent(self, percent: float) -> None:
+        raise NotImplementedError("Power control not supported by this laser.")
+
+    def read_power_percent(self) -> Optional[float]:
+        return None
+
+    def set_pulse_picker_ratio(self, ratio: int) -> None:
+        raise NotImplementedError("Pulse picker not supported by this laser.")
+
+    def read_pulse_picker_ratio(self) -> Optional[int]:
+        return None
+
+    def set_repetition_rate_hz(self, target_hz: float) -> float:
+        raise NotImplementedError("Repetition-rate control not supported.")
+
+    def read_repetition_rate_hz(self) -> Optional[float]:
+        return None
+
+    def allowed_rep_rates_hz(self) -> Optional[tuple[float, ...]]:
+        """Discrete selectable repetition rates, or None if continuous/N/A."""
         return None
 
 

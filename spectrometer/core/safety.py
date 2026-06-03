@@ -11,8 +11,8 @@ Responsibilities:
   vacuum is sufficient; ``check_vacuum_while_cold`` raises an alarm if vacuum
   is lost while the camera is cold (warn-only -- software cannot control
   vacuum).
-* **Acquisition interlock**: ``can_acquire`` gates scans on a cold, stable
-  camera and a cleared abort flag.
+* **Acquisition interlock**: ``can_acquire`` gates scans only on the E-stop /
+  abort latch -- cooling is NOT required (it only reduces shot noise).
 
 The abort flag is a :class:`threading.Event` shared with the camera
 controller and the (future) acquisition engine, which check it between steps.
@@ -118,6 +118,7 @@ class SafetyManager:
 
     @property
     def can_acquire(self) -> bool:
-        return (not self._estopped
-                and not self.abort.is_set()
-                and self.camera.can_acquire)
+        # Acquisition is allowed regardless of camera temperature -- cooling
+        # only reduces shot noise, it is not a precondition for grabbing a
+        # frame. Only the E-stop / abort latch blocks acquisition.
+        return not self._estopped and not self.abort.is_set()

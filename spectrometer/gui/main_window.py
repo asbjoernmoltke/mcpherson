@@ -7,7 +7,7 @@ event loop and fires even while a scan is running.
 """
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QMetaObject, QThread, pyqtSignal
 from PyQt6.QtWidgets import (QHBoxLayout, QMainWindow, QMessageBox, QScrollArea,
                              QVBoxLayout, QWidget)
 
@@ -30,6 +30,9 @@ class MainWindow(QMainWindow):
     _exposure = pyqtSignal(float)
     _shutter = pyqtSignal(bool)
     _laser = pyqtSignal(bool)
+    _laser_power = pyqtSignal(float)
+    _pulse_picker = pyqtSignal(int)
+    _rep_rate = pyqtSignal(float)
     _start_polling = pyqtSignal()
 
     def __init__(self, system: System):
@@ -97,6 +100,9 @@ class MainWindow(QMainWindow):
         self._exposure.connect(w.set_exposure)
         self._shutter.connect(w.set_shutter)
         self._laser.connect(w.set_laser)
+        self._laser_power.connect(w.set_laser_power)
+        self._pulse_picker.connect(w.set_pulse_picker)
+        self._rep_rate.connect(w.set_rep_rate)
         self._start_polling.connect(w.start_status_polling)
 
         # panels -> local re-emit (so emission happens on the GUI thread)
@@ -108,6 +114,9 @@ class MainWindow(QMainWindow):
         self.grating_panel.stop_requested.connect(self._on_grating_stop)
         self.shutter_laser_panel.shutter_toggled.connect(self._shutter.emit)
         self.shutter_laser_panel.laser_toggled.connect(self._laser.emit)
+        self.shutter_laser_panel.power_changed.connect(self._laser_power.emit)
+        self.shutter_laser_panel.pulse_picker_changed.connect(self._pulse_picker.emit)
+        self.shutter_laser_panel.rep_rate_changed.connect(self._rep_rate.emit)
         self.acq_panel.single_requested.connect(self._on_single)
         self.acq_panel.scan_requested.connect(self._on_scan)
         self.acq_panel.abort_requested.connect(self._on_abort)
@@ -161,6 +170,11 @@ class MainWindow(QMainWindow):
     # --- shutdown ------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
         self.system.abort.set()
+        # Stop the status timer inside the worker thread first, so Qt never
+        # tries to kill a timer from another thread on teardown.
+        if self._thread.isRunning():
+            QMetaObject.invokeMethod(
+                self.worker, "shutdown", Qt.ConnectionType.BlockingQueuedConnection)
         self._thread.quit()
         self._thread.wait(2000)
         super().closeEvent(event)

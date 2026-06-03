@@ -101,9 +101,7 @@ class AcquisitionEngine:
     # --- helpers -------------------------------------------------------
     def _guard(self) -> None:
         if self.abort.is_set() or self.safety.is_estopped:
-            raise EStopActive("Acquisition aborted.")
-        if not self.safety.can_acquire:
-            raise EStopActive("Camera not ready to acquire (cooling/interlock).")
+            raise EStopActive("Acquisition blocked: emergency stop / abort active.")
 
     def _emit_frame(self, frame: np.ndarray) -> None:
         if self.on_frame:

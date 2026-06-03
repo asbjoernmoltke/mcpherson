@@ -108,8 +108,9 @@ class CameraController(Controller):
             self.driver.set_internal_shutter(internal_shutter)
 
     @property
-    def can_acquire(self) -> bool:
-        """Acquisition is only allowed once the camera is cold and stable."""
+    def is_cooled(self) -> bool:
+        """Informational: True when cooled and temperature-stable (low-noise
+        regime). NOT required to acquire -- cooling only reduces shot noise."""
         return self.driver.is_cooler_on() and self.driver.is_temperature_stable()
 
     def grab(self, n_frames: int = 1, timeout: float = 5.0) -> np.ndarray:

@@ -19,12 +19,10 @@ results = {"frames": 0, "spectra": 0, "progress": 0, "errors": []}
 
 
 def main() -> int:
+    # Acquisition does not require cooling, so we drive single/scan with the
+    # camera at ambient -- exercising the uncooled-grab path.
     system = build_system(dummy=True, cooling_threshold=1.0e-4)
     system.open_all()
-    # allow cooling + force the dummy camera cold/stable for can_acquire
-    system.devices.vacuum.set_pressure(1.0e-6)
-    system.devices.camera.set_temperature(-60.0)
-    system.devices.camera._temp = -60.0
 
     app = QApplication(sys.argv)
     win = MainWindow(system)
@@ -37,15 +35,27 @@ def main() -> int:
     # Drive a sequence on the GUI timeline.
     QTimer.singleShot(200, win.acq_panel.single_requested.emit)
     QTimer.singleShot(700, lambda: win.acq_panel.scan_requested.emit(380.0, 520.0))
+    # Exercise the new laser controls (power / pulse-picker / rep-rate).
+    QTimer.singleShot(1500, lambda: win.shutter_laser_panel.power_changed.emit(42.0))
+    QTimer.singleShot(1700, lambda: win.shutter_laser_panel.pulse_picker_changed.emit(8))
+    QTimer.singleShot(1900, lambda: win.shutter_laser_panel.rep_rate_changed.emit(1.0e6))
     QTimer.singleShot(2500, win._on_estop)
     QTimer.singleShot(3000, app.quit)
 
     app.exec()
     win.close()
+
+    # Rep rate and pulse picker are independent controls. After power=42 %,
+    # pulse-picker=1/8, rep-rate=1 MHz (=1000 kHz, an allowed discrete rate):
+    laser = system.devices.laser
+    laser_ok = (abs(laser.read_power_percent() - 42.0) < 1e-6
+                and laser.read_pulse_picker_ratio() == 8
+                and laser.read_repetition_rate_hz() == 1.0e6)
     system.close_all()
 
     ok = (results["frames"] > 0 and results["spectra"] > 0
           and results["progress"] > 0 and not results["errors"]
+          and laser_ok
           and system.safety.is_estopped and not system.shutter.is_open
           and not system.laser.is_enabled)
     print("SMOKE RESULTS:", results,

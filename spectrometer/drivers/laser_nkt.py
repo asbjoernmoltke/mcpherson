@@ -1,0 +1,334 @@
+"""NKT Photonics laser driver (via the vendor NKTPDLL SDK).
+
+Implements :class:`~spectrometer.drivers.base.LaserDriver` for an NKT laser
+using the register-based Interbus protocol exposed by ``NKTPDLL.dll`` through
+the vendor's ``NKTP_DLL.py`` Python wrapper.
+
+This deployment targets an **NKT Origami XP**, which runs on the NKT
+**"Aeropulse mainboard"** (Interbus module type ``0x9D``). All controls go
+through a SINGLE open connection (one ``NKTLaser`` instance / one
+``openPorts``) -- the Interbus does not allow a second process to open the
+same port, so every control (emission, power, pulse-picker, rep-rate, status)
+is consolidated here.
+
+Register map (from the SDK ``Register Files`` for the aeroPulse mainboard;
+verify with a discovery scan once the laser is connected):
+
+* ``0x30`` Emission  : 0=off, 1=seed, 2=preamp, 3=booster  (U8)
+* ``0x34`` Pulse-Picker ratio ("Times", the rep-rate divider)  (U16)
+* ``0x37`` Output level (%) in 0.1 % units  (U16)
+* ``0x32`` Interlock (>0 = reset)  ;  ``0x66`` status bits  ;  ``0x67`` error
+
+SAFETY: ``disable()`` writes ``0`` to the emission register -- OFF=0 is
+consistent across all NKT products, so the E-stop is safe even if the precise
+model/map differs. ``open()``/``close()`` force standby so attaching or
+shutting down never leaves the beam on. Long emission stages and power are
+configurable via :class:`NKTRegisterMap`; switch presets if your unit differs.
+
+The vendor wrapper is imported lazily from ``sdk_path`` so the dummy/offline
+paths never require the DLL.
+"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+from dataclasses import dataclass
+from typing import Optional
+
+from ..utilities import log
+from .base import STANDARD_REP_RATES_HZ, LaserDriver
+
+DEFAULT_SDK_PATH = r"C:\Users\Public\Documents\NKT Photonics\SDK"
+_REG_SUCCESS = 0  # RegResultSuccess
+
+# Discrete amplifier repetition rates for the Origami XP (50-1000 kHz).
+ORIGAMI_REP_RATES_HZ = STANDARD_REP_RATES_HZ
+
+
+@dataclass(frozen=True)
+class NKTRegisterMap:
+    """Register layout + emission encoding for one NKT product family."""
+    name: str
+    module_type: Optional[int]      # Interbus device type, for address auto-detect
+    address: int = 15               # fallback module address if not auto-detected
+    emission_register: int = 0x30
+    emission_off: int = 0x00
+    emission_on: int = 0x03         # value for full emission (booster)
+    emission_seed: Optional[int] = 0x01
+    emission_preamp: Optional[int] = 0x02
+    power_register: Optional[int] = 0x37
+    power_pct_per_lsb: float = 0.1  # register LSB -> percent
+    pulse_picker_register: Optional[int] = 0x34
+    # Amplifier repetition-rate register: NOT yet identified for the aeroPulse
+    # mainboard / Origami (rep rate is a discrete amplifier setting separate
+    # from the pulse picker). Left None until confirmed from NKT CONTROL/docs.
+    rep_rate_register: Optional[int] = None
+    rep_rate_hz_per_lsb: float = 1.0
+    status_register: Optional[int] = 0x66
+    interlock_register: Optional[int] = 0x32
+
+
+# Presets. Default targets the Origami XP (aeroPulse mainboard, type 0x9D).
+AEROPULSE_MAINBOARD = NKTRegisterMap(
+    name="Aeropulse mainboard (0x9D) / Origami XP", module_type=0x9D,
+    emission_on=0x03, power_register=0x37, pulse_picker_register=0x34)
+SUPERK_FIANIUM = NKTRegisterMap(
+    name="SuperK Extreme / Fianium (0x60)", module_type=0x60,
+    emission_on=0x03, power_register=0x37, pulse_picker_register=0x34)
+FS50_EXAMPLE = NKTRegisterMap(
+    name="aeroPulse FS50 (example map)", module_type=None,
+    emission_on=0x04, emission_seed=None, emission_preamp=None,
+    power_register=0x99, pulse_picker_register=None)
+
+# Status-bit meanings for the aeroPulse/SuperK status register (0x66).
+_STATUS_BITS = {
+    0: "emission", 1: "interlock_off", 2: "interlock_power_failure",
+    3: "interlock_loop_off", 4: "external_disable", 5: "supply_voltage_low",
+    6: "module_temp_range", 15: "error_present",
+}
+
+
+def _load_nkt(sdk_path: str):
+    """Import and return the vendor ``NKTP_DLL`` module (sets NKTP_SDK_PATH)."""
+    os.environ.setdefault("NKTP_SDK_PATH", sdk_path)
+    wrapper_dir = os.path.join(sdk_path, "Examples", "DLL_Example_Python")
+    if wrapper_dir not in sys.path:
+        sys.path.append(wrapper_dir)
+    import NKTP_DLL  # noqa: E402 (deliberate lazy import)
+    return NKTP_DLL
+
+
+class NKTLaser(LaserDriver):
+    def __init__(self, port: Optional[str] = None, *,
+                 regmap: NKTRegisterMap = AEROPULSE_MAINBOARD,
+                 sdk_path: str = DEFAULT_SDK_PATH):
+        self.port = port
+        self.regmap = regmap
+        self.address = regmap.address
+        self.sdk_path = sdk_path
+        self._nkt = None
+        self._connected = False
+
+    # --- low-level helpers --------------------------------------------
+    def _api(self):
+        if self._nkt is None:
+            self._nkt = _load_nkt(self.sdk_path)
+        return self._nkt
+
+    def _write_u8(self, reg: int, value: int, *, what: str, raise_on_fail=True):
+        nkt = self._api()
+        result = nkt.registerWriteU8(self.port, self.address, reg, value, -1)
+        if result != _REG_SUCCESS:
+            msg = "NKTLaser %s failed: %s" % (what, nkt.RegisterResultTypes(result))
+            if raise_on_fail:
+                raise RuntimeError(msg)
+            log.error(msg)
+        return result
+
+    def _write_u16(self, reg: int, value: int, *, what: str):
+        nkt = self._api()
+        result = nkt.registerWriteU16(self.port, self.address, reg, value, -1)
+        if result != _REG_SUCCESS:
+            raise RuntimeError("NKTLaser %s failed: %s"
+                               % (what, nkt.RegisterResultTypes(result)))
+
+    def _read_u8(self, reg: int) -> Optional[int]:
+        nkt = self._api()
+        result, value = nkt.registerReadU8(self.port, self.address, reg, -1)
+        return value if result == _REG_SUCCESS else None
+
+    def _read_u16(self, reg: int) -> Optional[int]:
+        nkt = self._api()
+        result, value = nkt.registerReadU16(self.port, self.address, reg, -1)
+        return value if result == _REG_SUCCESS else None
+
+    def find_modules(self) -> dict[int, int]:
+        """Scan open ports, return {address: device_type}; logs findings."""
+        nkt = self._api()
+        nkt.openPorts(nkt.getAllPorts(), 1, 0)
+        found: dict[int, int] = {}
+        for portname in [p for p in nkt.getOpenPorts().split(",") if p]:
+            _result, dev_list = nkt.deviceGetAllTypesV2(portname)
+            for addr, dtype in enumerate(dev_list):
+                if dtype != 0:
+                    log.info("NKT module on %s: type 0x%04X at address %d"
+                             % (portname, dtype, addr))
+                    if self.port is None or portname == self.port:
+                        found[addr] = dtype
+        return found
+
+    # --- Driver lifecycle ---------------------------------------------
+    def open(self) -> None:
+        nkt = self._api()
+        modules = self.find_modules()
+        open_ports = [p for p in nkt.getOpenPorts().split(",") if p]
+        if self.port is None and open_ports:
+            self.port = open_ports[0]
+        if self.port is None:
+            raise RuntimeError("NKTLaser: no NKT port found. Is the laser "
+                               "connected and powered?")
+        # Auto-detect the module address by its Interbus type when known.
+        if self.regmap.module_type is not None:
+            matches = [a for a, t in modules.items() if t == self.regmap.module_type]
+            if matches:
+                self.address = matches[0]
+                log.info("NKTLaser: found %s at address %d on %s."
+                         % (self.regmap.name, self.address, self.port))
+            else:
+                log.warn("NKTLaser: module type 0x%04X (%s) not found among %s; "
+                         "using fallback address %d. Confirm the model."
+                         % (self.regmap.module_type, self.regmap.name,
+                            {a: hex(t) for a, t in modules.items()}, self.address))
+        self._connected = True
+        self.disable()  # safety: never leave the beam on when attaching
+        log.info("NKTLaser connected on %s (address %d); forced to standby."
+                 % (self.port, self.address))
+
+    def close(self) -> None:
+        if self._connected:
+            self.disable()  # fail safe
+            try:
+                self._nkt.closePorts(self.port or "")
+            except Exception as exc:  # pragma: no cover
+                log.error("NKTLaser closePorts error: %s" % exc)
+        self._connected = False
+        log.info("NKTLaser closed.")
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    # --- emission control ---------------------------------------------
+    def enable(self) -> None:
+        """Start full emission (booster stage)."""
+        self._write_u8(self.regmap.emission_register, self.regmap.emission_on,
+                       what="enable")
+        log.info("NKTLaser: emission ON (value %d)." % self.regmap.emission_on)
+
+    def disable(self) -> None:
+        """E-stop fast path: best-effort, retried, never raises."""
+        for attempt in range(3):
+            result = self._write_u8(self.regmap.emission_register,
+                                    self.regmap.emission_off,
+                                    what="disable", raise_on_fail=False)
+            if result == _REG_SUCCESS:
+                log.info("NKTLaser: emission OFF (standby).")
+                return
+            time.sleep(0.02)
+        log.fatal("NKTLaser: FAILED to confirm emission OFF after retries!")
+
+    def set_emission_stage(self, stage: str) -> None:
+        """Set a specific emission stage: 'off' | 'seed' | 'preamp' | 'booster'."""
+        rm = self.regmap
+        values = {"off": rm.emission_off, "seed": rm.emission_seed,
+                  "preamp": rm.emission_preamp, "booster": rm.emission_on}
+        if stage not in values or values[stage] is None:
+            raise ValueError("Unsupported emission stage %r for %s"
+                             % (stage, rm.name))
+        self._write_u8(rm.emission_register, values[stage],
+                       what="set_emission_stage(%s)" % stage)
+
+    @property
+    def is_enabled(self) -> bool:
+        value = self._read_u8(self.regmap.emission_register)
+        return value is not None and value != self.regmap.emission_off
+
+    @property
+    def emission_stage(self) -> str:
+        value = self._read_u8(self.regmap.emission_register)
+        rm = self.regmap
+        return {rm.emission_off: "off", rm.emission_seed: "seed",
+                rm.emission_preamp: "preamp", rm.emission_on: "booster"
+                }.get(value, "unknown")
+
+    # --- power --------------------------------------------------------
+    def set_power_percent(self, percent: float) -> None:
+        if self.regmap.power_register is None:
+            raise RuntimeError("Power control not mapped for %s" % self.regmap.name)
+        percent = max(0.0, min(100.0, percent))
+        raw = int(round(percent / self.regmap.power_pct_per_lsb))
+        self._write_u16(self.regmap.power_register, raw, what="set_power")
+        log.info("NKTLaser: power set to %.1f %%." % percent)
+
+    def read_power_percent(self) -> Optional[float]:
+        if self.regmap.power_register is None:
+            return None
+        raw = self._read_u16(self.regmap.power_register)
+        return None if raw is None else raw * self.regmap.power_pct_per_lsb
+
+    # --- pulse picking / repetition rate ------------------------------
+    def set_pulse_picker_ratio(self, ratio: int) -> None:
+        """Pulse-picker divider (register 0x34). Output rep rate = seed / ratio.
+        ratio=1 passes every pulse; larger ratios lower the rep rate."""
+        if self.regmap.pulse_picker_register is None:
+            raise RuntimeError("Pulse picker not mapped for %s" % self.regmap.name)
+        if ratio < 1:
+            raise ValueError("Pulse-picker ratio must be >= 1.")
+        self._write_u16(self.regmap.pulse_picker_register, int(ratio),
+                        what="set_pulse_picker_ratio")
+        log.info("NKTLaser: pulse-picker ratio = %d." % ratio)
+
+    def read_pulse_picker_ratio(self) -> Optional[int]:
+        if self.regmap.pulse_picker_register is None:
+            return None
+        return self._read_u16(self.regmap.pulse_picker_register)
+
+    def allowed_rep_rates_hz(self) -> Optional[tuple[float, ...]]:
+        """Discrete amplifier rep rates (50-1000 kHz). The GUI gates the
+        control on ``read_repetition_rate_hz`` being non-None, which requires
+        ``rep_rate_register`` to be identified (TBD for the Origami)."""
+        return ORIGAMI_REP_RATES_HZ
+
+    def read_repetition_rate_hz(self) -> Optional[float]:
+        """Amplifier repetition rate (a discrete setting, separate from the
+        pulse picker). Returns None until ``rep_rate_register`` is identified
+        for this module -- the GUI then greys out the control."""
+        if self.regmap.rep_rate_register is None:
+            return None
+        raw = self._read_u16(self.regmap.rep_rate_register)
+        return None if raw is None else raw * self.regmap.rep_rate_hz_per_lsb
+
+    def set_repetition_rate_hz(self, target_hz: float) -> float:
+        """Snap to the nearest allowed discrete rate and apply it."""
+        if self.regmap.rep_rate_register is None:
+            raise RuntimeError(
+                "Origami repetition-rate register not yet identified; cannot "
+                "set rep rate. Use the pulse-picker ratio, or supply "
+                "NKTRegisterMap.rep_rate_register once known.")
+        applied = min(ORIGAMI_REP_RATES_HZ, key=lambda r: abs(r - target_hz))
+        raw = int(round(applied / self.regmap.rep_rate_hz_per_lsb))
+        self._write_u16(self.regmap.rep_rate_register, raw, what="set_rep_rate")
+        log.info("NKTLaser: rep rate %.0f kHz." % (applied / 1e3))
+        return applied
+
+    # --- status -------------------------------------------------------
+    def read_status_bits(self) -> dict[str, bool]:
+        if self.regmap.status_register is None:
+            return {}
+        raw = self._read_u16(self.regmap.status_register)
+        if raw is None:
+            return {}
+        return {name: bool(raw & (1 << bit)) for bit, name in _STATUS_BITS.items()}
+
+    def reset_interlock(self) -> None:
+        if self.regmap.interlock_register is None:
+            raise RuntimeError("Interlock register not mapped for %s" % self.regmap.name)
+        self._write_u16(self.regmap.interlock_register, 1, what="reset_interlock")
+        log.info("NKTLaser: interlock reset requested.")
+
+    def get_status(self) -> str:
+        if not self._connected:
+            return "Disconnected"
+        try:
+            stage = self.emission_stage
+            ratio = self.read_pulse_picker_ratio()
+            power = self.read_power_percent()
+            parts = [stage]
+            if power is not None:
+                parts.append("%.0f%%" % power)
+            if ratio:
+                parts.append("PP 1/%d" % ratio)
+            return ", ".join(parts)
+        except Exception as exc:  # pragma: no cover
+            return f"Error: {exc}"

@@ -72,16 +72,14 @@ def test_stitch_averages_overlap():
 
 
 # --- end-to-end dummy scan -------------------------------------------
-def test_dummy_scan_runs_and_covers_range():
+def test_dummy_scan_runs_uncooled_and_covers_range():
+    # Cooling is NOT required to acquire (it only reduces shot noise); the
+    # scan must run with the camera at ambient.
     sys = build_system(dummy=True, cooling_threshold=1.0e-4)
     sys.open_all()
     try:
-        sys.devices.vacuum.set_pressure(1.0e-6)  # allow cooling
-        sys.camera.cooldown(-60.0)
-        # force the dummy camera to "stable" quickly for the can_acquire gate
-        sys.devices.camera._setpoint = -60.0
-        sys.devices.camera._temp = -60.0
-        assert sys.safety.can_acquire
+        assert not sys.camera.is_cooled       # camera is warm
+        assert sys.safety.can_acquire         # ...but acquisition is allowed
 
         progress = []
         sys.engine.on_progress = lambda i, n: progress.append((i, n))
@@ -93,5 +91,16 @@ def test_dummy_scan_runs_and_covers_range():
         assert np.isfinite(spectrum).all()
         assert progress and progress[-1][0] == progress[-1][1]
         assert not sys.shutter.is_open  # shutter closed after scan
+    finally:
+        sys.close_all()
+
+
+def test_single_grab_works_without_cooling():
+    sys = build_system(dummy=True)
+    sys.open_all()
+    try:
+        assert not sys.camera.is_cooled
+        wl, intensity = sys.engine.single()
+        assert intensity.size == 2048 and np.isfinite(intensity).all()
     finally:
         sys.close_all()
