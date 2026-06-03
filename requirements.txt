@@ -1,0 +1,11 @@
+# Core
+numpy>=1.24
+scipy>=1.10
+pyserial>=3.5
+
+# Camera / instrument control
+pylablib>=1.4        # Andor SDK2 camera wrapper (real hardware only)
+
+# GUI (added in the GUI phase)
+PyQt6>=6.5
+pyqtgraph>=0.13
