@@ -22,9 +22,10 @@ logs/
 # Claude Code local settings
 .claude/settings.local.json
 
-# Vendor reference material (NKT-copyrighted; do not redistribute). Local-only
-# until the laser is working, then removed entirely.
+# Vendor reference material (NKT / Edwards-copyrighted; do not redistribute).
+# Local-only reference, removed once the corresponding driver is working.
 OXP_resources/
+vacuum_resources/
 
 # OS
 Thumbs.db

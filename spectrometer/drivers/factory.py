@@ -39,7 +39,9 @@ class DeviceBundle:
 
 def build_devices(dummy: bool = False, *, grating_port: str = "COM5",
                   laser_port: str | None = None,
-                  laser_interface: str = "cli") -> DeviceBundle:
+                  laser_interface: str = "cli",
+                  vacuum_port: str = "COM7", vacuum_gauge: int = 1,
+                  vacuum_units: str = "mbar") -> DeviceBundle:
     """Construct all drivers. ``dummy=True`` returns an all-simulated bundle.
 
     ``laser_port`` is the Origami's COM port. ``laser_interface`` selects how
@@ -68,9 +70,9 @@ def build_devices(dummy: bool = False, *, grating_port: str = "COM5",
     from .andor_camera import AndorCamera
     from .mcpherson import MP_789A_4
     from .shutter import DummyShutter
-    from .vacuum import DummyVacuum
+    from .vacuum_edwards import EdwardsTIC
 
-    log.warn("Building REAL device bundle; shutter/vacuum are still simulated "
+    log.warn("Building REAL device bundle; the shutter is still simulated "
              "until that hardware is selected.")
     laser = _build_origami(laser_interface, laser_port)
     return DeviceBundle(
@@ -78,7 +80,7 @@ def build_devices(dummy: bool = False, *, grating_port: str = "COM5",
         grating=MP_789A_4(grating_port),
         shutter=DummyShutter(),
         laser=laser,
-        vacuum=DummyVacuum(),
+        vacuum=EdwardsTIC(vacuum_port, gauge=vacuum_gauge, units=vacuum_units),
     )
 
 

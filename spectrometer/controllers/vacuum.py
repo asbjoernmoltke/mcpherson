@@ -24,8 +24,13 @@ class VacuumController(Controller):
         self._pressure = float("inf")
 
     def poll(self) -> float:
-        """Read the gauge; updates cached pressure and notifies listeners."""
-        self._pressure = self.driver.read_pressure()
+        """Read the gauge; updates cached pressure and notifies listeners.
+        On a read error the cached pressure is set to +inf (fail-safe)."""
+        try:
+            self._pressure = self.driver.read_pressure()
+        except Exception as exc:
+            self._pressure = float("inf")
+            log.error("Vacuum read failed: %s (treating as unsafe)." % exc)
         self._notify(self.status)
         return self._pressure
 
@@ -39,8 +44,13 @@ class VacuumController(Controller):
 
     @property
     def vacuum_ok(self) -> bool:
-        """True when pressure is at or below the safe cooling threshold."""
-        return self.driver.read_pressure() <= self.cooling_threshold
+        """True when pressure is at/below the safe cooling threshold. A read
+        error is fail-safe: returns False (cannot confirm vacuum => not safe)."""
+        try:
+            return self.driver.read_pressure() <= self.cooling_threshold
+        except Exception as exc:
+            log.error("Vacuum read failed in vacuum_ok: %s (=> not ok)." % exc)
+            return False
 
     @property
     def status(self) -> str:

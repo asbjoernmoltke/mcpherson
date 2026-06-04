@@ -54,17 +54,29 @@ max pump power. Then bench-verify enable/disable with the beam dumped.
 
 ## 2. Vacuum gauge (read-only)
 
-Driver: `spectrometer/drivers/vacuum.py` (currently `DummyVacuum`).
-Vacuum is controlled manually on isolated hardware — software only reads it.
+Hardware: **Edwards TIC** controller + **wide-range gauge** (sensor), with an
+**nXDS15i** backing pump and an **EXT (EXT406PM) turbo** pump. Per the locked
+decision the software is READ-ONLY (reads the wide-range gauge to gate cooling;
+never commands the pumps). Driver: `EdwardsTIC` (`vacuum_edwards.py`), wired into
+the real factory path; `DummyVacuum` for offline. `VacuumController` is now
+fail-safe (a gauge read error => `vacuum_ok=False`, so cooling is blocked).
 
-| ✓ | Item | Why | Current placeholder | Where to set |
-|---|------|-----|---------------------|--------------|
-| ☐ | ⚠️ **Safe pressure threshold for cooling** | Camera must not cool above this (interlock) | `1.0e-4` (arbitrary) | `VacuumController` `cooling_threshold` / `build_system` |
-| ☐ | ⚠️ **Gauge units** (mbar / Torr / Pa) | Threshold + display must match the gauge | `"mbar"` | `DummyVacuum` / real driver `units` |
-| ☐ | 🔧 **Gauge make/model** | Determines the read interface | none (dummy) | new real driver |
-| ☐ | 🔧 **Read interface** (serial / analog / USB / display-only) | How software reads pressure | dummy returns a fixed value | new real `VacuumDriver` |
-| ☐ | 🔧 **Output format / scaling** | Convert raw reading → pressure | n/a | new real driver |
-| ☐ | 📋 **Loss-of-vacuum response** | We alarm (warn-only); confirm that's enough | alarm in `SafetyManager.check_vacuum_while_cold` | — |
+TIC protocol: 9600 8N1, CR-terminated, object-ID commands (`?V913/914/915` =
+gauge 1/2/3). Confirm the real format/slot/units with `tests/discover_edwards.py`.
+
+| ✓ | Item | Why | Current value | Where to set |
+|---|------|-----|---------------|--------------|
+| ☐ | ⚠️ **Which gauge slot is the wide-range gauge** | Read the right sensor | `gauge=1` (object 913) | `build_devices(vacuum_gauge=...)` |
+| ☐ | ⚠️ **Gauge units** (mbar/Torr/Pa) | Threshold + display must match | `"mbar"` | `build_devices(vacuum_units=...)` |
+| ☐ | ⚠️ **Safe pressure threshold for cooling** | Camera mustn't cool above this | `1.0e-4` (arbitrary) | `build_system(cooling_threshold=...)` |
+| ☐ | 🔧 **TIC COM port** | Serial connection | `COM7` (guess) | `build_devices(vacuum_port=...)` |
+| ☐ | 🔧 **Value reply format** (`<p>;<unit>;<state>`?) | Correct parse | assumed `;`-separated, field0=pressure | `EdwardsTIC.parse_value_reply` |
+| ☐ | 📋 **Pump object IDs** (turbo/backing) | Optional status display | turbo=904, backing=910 (guess) | `EdwardsTIC(turbo_object=, backing_object=)` |
+| ☐ | 📋 **Loss-of-vacuum response** | Warn-only alarm | `SafetyManager.check_vacuum_while_cold` | — |
+
+**Action:** run `python tests/discover_edwards.py [COM]` → identify the
+wide-range gauge slot (setup/type reply), the value format, and the unit; set
+`vacuum_gauge`/`vacuum_units`/`vacuum_port` accordingly.
 
 ---
 
