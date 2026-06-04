@@ -11,26 +11,29 @@ from spectrometer.core.system import build_system
 
 # --- calibration ------------------------------------------------------
 def test_linear_calibration_roundtrip():
-    cal = default_calibration("1200g/mm", n_pixels=2048)
+    # Real McPherson 234/302 1200 g/mm calibration (1024 px Newton).
+    cal = default_calibration("1200g/mm")
+    assert cal.n_pixels == 1024
     pos = 50_000
     wl = cal.center_wavelength(pos)
     assert cal.wavelength_to_position(wl) == pytest.approx(pos, abs=1)
-    axis = cal.wavelength_axis(pos)
-    assert axis.size == 2048
+    assert cal.wavelength_axis(pos).size == 1024
     lo, hi = cal.position_to_wavelength_range(pos)
     assert lo < wl < hi
-    # ~200 nm window for the 1200 g/mm preset
-    assert cal.window_width_nm == pytest.approx(200.0, rel=1e-6)
+    # 1200 g/mm: 4 nm/mm * 0.026 mm/px * 1024 px ~= 106.5 nm window.
+    assert cal.window_width_nm == pytest.approx(0.104 * 1024, rel=1e-6)
+    # Home wavelength sits at position 0.
+    assert cal.center_wavelength(0) == pytest.approx(279.70)
 
 
 def test_scan_positions_cover_range_with_overlap():
-    cal = default_calibration("1200g/mm", n_pixels=2048)
-    positions = cal.scan_positions(300.0, 800.0, overlap=0.2)
+    cal = default_calibration("1200g/mm")
+    # Within the 1200 g/mm physical range (30-550 nm).
+    positions = cal.scan_positions(300.0, 500.0, overlap=0.2)
     assert positions.size >= 2
-    # union of windows must cover the requested span
     ranges = [cal.position_to_wavelength_range(p) for p in positions]
     assert min(r[0] for r in ranges) <= 300.0
-    assert max(r[1] for r in ranges) >= 800.0
+    assert max(r[1] for r in ranges) >= 500.0
 
 
 # --- frame reduction --------------------------------------------------
@@ -85,9 +88,9 @@ def test_dummy_scan_runs_uncooled_and_covers_range():
         sys.engine.on_progress = lambda i, n: progress.append((i, n))
         sys.engine.n_frames = 1
 
-        grid, spectrum = sys.engine.scan(350.0, 600.0)
+        grid, spectrum = sys.engine.scan(350.0, 500.0)   # within 1200 g/mm range
 
-        assert grid[0] <= 360.0 and grid[-1] >= 590.0
+        assert grid[0] <= 360.0 and grid[-1] >= 490.0
         assert np.isfinite(spectrum).all()
         assert progress and progress[-1][0] == progress[-1][1]
         assert not sys.shutter.is_open  # shutter closed after scan

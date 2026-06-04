@@ -678,7 +678,11 @@ class DummyGrating(GratingDriver):
     duration is deliberately short and capped so offline scans run quickly.
     """
 
-    MAX_POSITION = 1_000_000  # soft upper step limit
+    # Position is tracked relative to the home flag (0). The 234/302 spans
+    # millions of controller-steps and goes negative below the home wavelength,
+    # so the soft limits are wide and symmetric.
+    MIN_POSITION = -9_000_000
+    MAX_POSITION = 9_000_000
     SIM_STEP_RATE = 200_000   # simulated steps/second
     SIM_MAX_MOVE_TIME = 0.5   # cap on simulated move duration (s)
 
@@ -749,9 +753,9 @@ class DummyGrating(GratingDriver):
         if steps == 0:
             return
         target = self._position + steps
-        if target < 0 or target > self.MAX_POSITION:
+        if target < self.MIN_POSITION or target > self.MAX_POSITION:
             log.warn("DummyGrating: move to %d clamped to limits." % target)
-            target = max(0, min(self.MAX_POSITION, target))
+            target = max(self.MIN_POSITION, min(self.MAX_POSITION, target))
 
         duration = min(abs(steps) / self.SIM_STEP_RATE, self.SIM_MAX_MOVE_TIME)
         self._stop_requested = False

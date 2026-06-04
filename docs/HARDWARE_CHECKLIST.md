@@ -116,31 +116,44 @@ Software-synced with the camera (camera defines the exposure window).
 
 ---
 
-## 5. Grating — McPherson 789A-4
+## 5. Grating — McPherson 234/302 + 789A-4 (CONFIRMED from spec)
 
-Driver: `spectrometer/drivers/mcpherson.py` (real, carried over and working).
+**McPherson 234/302** monochromator (s/n 302438), **200 mm f.l., f/4.5**, driven
+by the **789A-4** scan controller (`mcpherson.py`). Protocol = **ASCII decimal**
+(commands like `+72000`, `M+23000`, `F1000,0`; the `]` limit query returns a
+decimal bit-sum: 2=moving, 32=home blocked, 64/128=upper/lower limit). Drive:
+18000 motor-steps/rev, **36000 controller-steps/rev** (half-stepped; confirmed
+by the homing −108000="3 rev").
 
-| ✓ | Item | Why | Current placeholder | Where to set |
-|---|------|-----|---------------------|--------------|
-| ☐ | 🔧 **Grating COM port** | Serial connection | `COM5` | `build_devices(grating_port=...)` |
-| ☐ | 🔧 **Installed grating(s)** (g/mm) | Selects calibration + window width | `1200g/mm` default | `build_system(grating_name=...)` |
-| ☐ | ⚠️ **Backlash steps** | Repeatable positioning | `0` | `GratingController` `backlash` |
-| ☐ | 🔧 **Step ↔ position limits** | Avoid driving into end stops | driver limit switches + `1_000_000` soft cap | `mcpherson.py` / calibration |
+| ✓ | Item | Why | Value | Where |
+|---|------|-----|-------|-------|
+| ☑ | 🔧 **Monochromator + drive** | Calibration basis | 234/302, 200 mm f/4.5; 36000 steps/rev | `calibration.py` `MCPHERSON_234_302` |
+| ☑ | 🔧 **Gratings + home λ** | Dispersion + reference | 2400 (279.70), 1200 (279.70), 599.45 (279.82) | `MCPHERSON_234_302` |
+| ☐ | 🔧 **Grating COM port** | Serial connection | `COM5` (guess) | `build_devices(grating_port=...)` |
+| ☐ | 🔧 **Active grating** | Which one is installed now | `1200g/mm` default | `build_system(grating_name=...)` |
+| ☐ | ⚠️ **steps/rev = 36000 vs 18000** | 2× factor on λ — verify with one move | `STEPS_PER_MOTOR_REV=36000` | `calibration.py` |
+| ☐ | ⚠️ **Scan direction sign** | Does +steps raise or lower λ | `DIRECTION=+1` | `calibration.py` |
+| ☐ | ⚠️ **Backlash steps** | Repeatable positioning | `0` (homing backs into the flag) | `GratingController.backlash` |
 
 ---
 
-## 6. Calibration (position ↔ wavelength)
+## 6. Calibration (position ↔ wavelength) — DERIVED, lamp-verify pending
 
-Module: `spectrometer/core/calibration.py`. Current presets are **development
-placeholders** (linear, ~200 nm window) and must be replaced with measured data.
+`core/calibration.py` now holds the **real 234/302** linear calibration per
+grating (replacing the placeholders): `nm_per_step = nm_per_motor_rev / 36000`,
+`nm_per_pixel = dispersion(nm/mm) × 0.026 mm` (Newton 26 µm), home λ at step 0.
 
-| ✓ | Item | Why | Current placeholder | Where to set |
-|---|------|-----|---------------------|--------------|
-| ☐ | 🔧 **Per-grating calibration data** | Accurate wavelength axis | synthetic linear presets | `default_calibration` / `LinearCalibration.from_file` |
-| ☐ | 🔧 **Data source/format** | How calibration is produced/stored | JSON via `to_file/from_file` | `core/calibration.py` |
-| ☐ | 🔧 **Center wavelength vs step** | Dispersion of the scan mechanism | `nm_per_step` presets | calibration file |
-| ☐ | 🔧 **Dispersion across detector** | nm per pixel | `nm_per_pixel` presets | calibration file |
-| ☐ | 📋 **Wavelength operating limits** | Guard scan range | `position_limits` | calibration |
+| Grating | nm/step | nm/pixel | window (1024 px) | step range |
+|---|---|---|---|---|
+| 1200 | 5.556e-5 | 0.104 | 106.5 nm | −4.49M … +4.87M |
+| 2400 | 2.778e-5 | 0.052 | 53.2 nm | −8.99M … −0.17M |
+| 599.45 | 1.111e-4 | 0.208 | 213 nm | −2.25M … +7.38M |
+
+| ✓ | Item | Why | Status |
+|---|------|-----|--------|
+| ☑ | 🔧 **Per-grating dispersion + nm/step** | Wavelength axis | derived from spec |
+| ☐ | ⚠️ **Lamp verification** | Confirm steps/rev (2×) + direction + absolute λ offset | measure Hg/Ne/Ar lines, fit, save |
+| ☐ | 📋 **Persisted measured calibration** | Use a fitted file over the nominal | `LinearCalibration.to_file/from_file` |
 
 ---
 

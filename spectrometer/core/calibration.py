@@ -97,14 +97,46 @@ class LinearCalibration:
         return cls(**data)
 
 
-# Default offline calibrations per grating: ~200 nm window over 2048 pixels.
-# These are placeholders for development; replace with measured calibrations.
-def default_calibration(grating: str = "1200g/mm", n_pixels: int = 1024) -> LinearCalibration:
-    presets = {
-        "1200g/mm": dict(wl0_nm=200.0, nm_per_step=1.0e-3, nm_per_pixel=200.0 / n_pixels),
-        "2400g/mm": dict(wl0_nm=200.0, nm_per_step=0.5e-3, nm_per_pixel=100.0 / n_pixels),
-        "599.45g/mm": dict(wl0_nm=200.0, nm_per_step=2.0e-3, nm_per_pixel=400.0 / n_pixels),
-    }
-    if grating not in presets:
+# --- McPherson 234/302 monochromator (200 mm f.l., f/4.5) ----------------
+# Derived from the instrument's grating table + the 789A-4 scan drive:
+#   nm_per_step   = nm_per_motor_rev / STEPS_PER_MOTOR_REV
+#   nm_per_pixel  = dispersion_nm_per_mm * PIXEL_MM   (Newton 26 um pixels)
+# Home wavelength sits at position 0 after homing. Two factors are still to be
+# verified with a calibration lamp (configurable here, not assumed in stone):
+#   STEPS_PER_MOTOR_REV: the homing arithmetic (-108000 = "3 rev", +72000 =
+#       "2 rev") implies 36000 controller-steps/rev (half-stepping of the
+#       18000 motor-step/rev drive). A 2x error here scales wavelength.
+#   DIRECTION: sign of nm per +step (does +steps raise or lower wavelength).
+STEPS_PER_MOTOR_REV = 36000
+DIRECTION = +1
+PIXEL_MM = 0.026  # Newton DO920P 26 um pixels
+
+# grating -> (nm/motor-rev, dispersion nm/mm, home wavelength nm, (wl_min, wl_max))
+MCPHERSON_234_302 = {
+    "2400g/mm": (1.0, 2.0, 279.70, (30.0, 275.0)),
+    "1200g/mm": (2.0, 4.0, 279.70, (30.0, 550.0)),
+    "599.45g/mm": (4.0, 8.0, 279.82, (30.0, 1100.0)),
+}
+
+
+def mcpherson_234_302(grating: str = "1200g/mm", *, n_pixels: int = 1024,
+                      steps_per_motor_rev: int = STEPS_PER_MOTOR_REV,
+                      direction: int = DIRECTION) -> LinearCalibration:
+    """Calibration for the McPherson 234/302 (s/n 302438) from its spec sheet."""
+    if grating not in MCPHERSON_234_302:
         raise ValueError(f"Unknown grating: {grating}")
-    return LinearCalibration(name=grating, n_pixels=n_pixels, **presets[grating])
+    nm_per_rev, disp_nm_per_mm, home_wl, (wl_lo, wl_hi) = MCPHERSON_234_302[grating]
+    nm_per_step = direction * nm_per_rev / steps_per_motor_rev
+    nm_per_pixel = disp_nm_per_mm * PIXEL_MM
+    # Step positions for the wavelength range (home at position 0).
+    p_lo = int((wl_lo - home_wl) / nm_per_step)
+    p_hi = int((wl_hi - home_wl) / nm_per_step)
+    return LinearCalibration(
+        name=f"234/302 {grating}", n_pixels=n_pixels, wl0_nm=home_wl,
+        nm_per_step=nm_per_step, nm_per_pixel=nm_per_pixel,
+        position_limits=(min(p_lo, p_hi), max(p_lo, p_hi)))
+
+
+# Default calibration entry point (used by the system builder).
+def default_calibration(grating: str = "1200g/mm", n_pixels: int = 1024) -> LinearCalibration:
+    return mcpherson_234_302(grating, n_pixels=n_pixels)
