@@ -80,21 +80,25 @@ wide-range gauge slot (setup/type reply), the value format, and the unit; set
 
 ---
 
-## 3. Camera — Andor
+## 3. Camera — Andor Newton DO920P (CONFIRMED from datasheet)
 
-Driver: `spectrometer/drivers/andor_camera.py` (real `AndorCamera` via pylablib).
+**Andor Newton CCD, model DO920P-BEN-995** (s/n CCD-26178); sensor **e2v CCD30-11**
+(s/n 15102-01-23), **1024 × 256 px, 26 µm square pixels, 16-bit**. Full-well
+~457,768 e⁻/px; read noise ~5-30 e⁻ (A/D rate 3/1/0.05 MHz × preamp ×1/×2/×4).
+SDK2 (Driver Pack 2), tested on hw AG20.24 / SDK 2.104.33000.0. Driver:
+`AndorCamera` (`andor_camera.py`); specs in `NEWTON_*` constants.
 
-| ✓ | Item | Why | Current placeholder | Where to set |
-|---|------|-----|---------------------|--------------|
-| ☐ | ⚠️ **Operating cooling setpoint** (°C) | Target sensor temperature for acquisition | `-60` (GUI default) | GUI setpoint / `CameraController.cooldown` |
-| ☐ | ⚠️ **Fan policy while cold** | Whether the fan may run during cold operation | not forced | `CameraController` / `set_fan_mode` |
-| ☐ | ⚠️ **Warm-up target before cooler off** | Avoid thermal shock on shutdown | `10 °C` | `CameraController` `warm_target_c` |
-| ☐ | 🔧 **Camera model + SDK DLL path** | Confirm pylablib finds the Andor SDK | `C:/Program Files/Andor Driver Pack 2` | `AndorCamera` `sdk2_path` |
-| ☐ | 🔧 **Detector size** (pixels) | Spectrum length + calibration | assumes `2048` wide | read from camera at runtime |
-| ☐ | 🔧 **Internal shutter mode** | Camera's own shutter vs external beam shutter | not set | `CameraController.configure` |
-| ☐ | 🔧 **Trigger mode** (internal vs external) | Software-sync uses internal trigger | `"int"` assumed | `CameraController.configure` |
-| ☐ | 📋 **Saturation level** | Saturation guard threshold | `65000` (16-bit) | `controllers/camera.py` `SATURATION_LEVEL` |
-| ☐ | 📋 **Gain / amplifier settings** | Acquisition quality | not exposed yet | future |
+| ✓ | Item | Why | Value | Where |
+|---|------|-----|-------|-------|
+| ☑ | ⚠️ **Cooling setpoint + range** | Target temp | rated **-100..-20 °C**, typical **-80** | `camera.py` `MIN/MAX/DEFAULT_SETPOINT_C`; GUI spinbox |
+| ☐ | ⚠️ **Fan policy while cold** | Air vs water cooling | default **fan 'full'** (air); set 'off' only if water-cooled — **CONFIRM** | `CameraController.cooling_fan_mode` |
+| ☐ | ⚠️ **Vacuum level for turbo-cooling** | Safe-to-cool threshold (you're checking the doc) | `1e-4` placeholder | `build_system(cooling_threshold=)` |
+| ☑ | ⚠️ **Warm-up target before cooler off** | Avoid thermal shock | `10 °C` | `CameraController.warm_target_c` |
+| ☑ | 🔧 **Detector size / pixels** | Spectrum length + calibration | **1024 × 256**, 26 µm | `NEWTON_*`; calibration `n_pixels=1024` |
+| ☑ | 🔧 **Model + SDK** | pylablib backend | Newton = **SDK2** (`AndorSDK2Camera`), `C:/Program Files/Andor Driver Pack 2` | `AndorCamera.sdk2_path` |
+| ☑ | 📋 **Saturation level** | Guard threshold | `65000` (16-bit ADC; full-well 457,768 e⁻) | `SATURATION_LEVEL` |
+| ☐ | 🔧 **Internal shutter / trigger mode** | Camera shutter vs external; sync | internal trigger assumed | `CameraController.configure` |
+| ☐ | 📋 **A/D rate + preamp gain** | Sensitivity/noise | 3/1/0.05 MHz × ×1/×2/×4 (not exposed yet) | future `configure` |
 
 ---
 

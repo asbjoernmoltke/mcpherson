@@ -53,9 +53,9 @@ def build_system(dummy: bool = False, *, grating_port: str = "COM5",
         devices.vacuum,
         **({"cooling_threshold": cooling_threshold}
            if cooling_threshold is not None else {}))
-    # Placeholder calibration (real ones load from file). Use the standard
-    # detector width rather than querying the camera, which is not yet open.
-    calibration = default_calibration(grating_name, n_pixels=2048)
+    # Placeholder calibration (real ones load from file). Newton DO920P is
+    # 1024 px wide; query the live camera once open for the authoritative size.
+    calibration = default_calibration(grating_name, n_pixels=1024)
 
     camera = CameraController(devices.camera,
                               vacuum_ok=lambda: vacuum.vacuum_ok,

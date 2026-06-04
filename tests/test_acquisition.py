@@ -101,6 +101,6 @@ def test_single_grab_works_without_cooling():
     try:
         assert not sys.camera.is_cooled
         wl, intensity = sys.engine.single()
-        assert intensity.size == 2048 and np.isfinite(intensity).all()
+        assert intensity.size == 1024 and np.isfinite(intensity).all()  # Newton width
     finally:
         sys.close_all()

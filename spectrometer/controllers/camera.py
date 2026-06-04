@@ -24,8 +24,15 @@ from ..utilities import log
 from .base import Controller
 from ..core.exceptions import InterlockError
 
-# 16-bit sensor full scale; flag frames at/above this fraction as saturated.
+# Newton DO920P is 16-bit (ADC max 65535); flag frames near full scale as
+# saturated. The sensor full-well is ~457,768 e-/pixel, but the ADC saturates
+# at/around this count, so this is the practical per-pixel saturation guard.
 SATURATION_LEVEL = 65000
+
+# Andor Newton DO920P cooling spec: rated -100..-20 C, typical operating -80 C.
+MIN_SETPOINT_C = -100.0
+MAX_SETPOINT_C = -20.0
+DEFAULT_SETPOINT_C = -80.0
 
 
 class CameraController(Controller):
@@ -33,22 +40,34 @@ class CameraController(Controller):
                  vacuum_ok: Callable[[], bool],
                  warm_target_c: float = 10.0,
                  stable_timeout_s: float = 300.0,
+                 cooling_fan_mode: str = "full",
                  abort: Optional[threading.Event] = None):
         super().__init__("Camera")
         self.driver = driver
         self._vacuum_ok = vacuum_ok
         self.warm_target_c = warm_target_c
         self.stable_timeout_s = stable_timeout_s
+        # Fan mode while cooling. Default 'full' (safe for air-cooled deep
+        # cooling); set 'off' only if the head is water-cooled. CONFIRM.
+        self.cooling_fan_mode = cooling_fan_mode
         self._abort = abort or threading.Event()
         self.last_frame_saturated = False
 
     # --- cooling lifecycle --------------------------------------------
     def cooldown(self, setpoint_c: float) -> None:
-        """Begin cooling to ``setpoint_c`` -- gated on the vacuum interlock."""
+        """Begin cooling to ``setpoint_c`` -- gated on the vacuum interlock.
+        Clamped to the camera's rated range and turns the fan on first."""
         if not self._vacuum_ok():
             raise InterlockError(
                 "Refusing to cool the camera: vacuum is not sufficient.")
-        log.info("CameraController: cooling to %.1f C." % setpoint_c)
+        setpoint_c = max(MIN_SETPOINT_C, min(MAX_SETPOINT_C, setpoint_c))
+        # Fan on before cooling hard (dissipates heat from the TE cooler).
+        try:
+            self.driver.set_fan_mode(self.cooling_fan_mode)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            log.warn("CameraController: could not set fan mode: %s" % exc)
+        log.info("CameraController: cooling to %.1f C (fan=%s)."
+                 % (setpoint_c, self.cooling_fan_mode))
         self.driver.set_temperature(setpoint_c)
         self._notify(self.status)
 

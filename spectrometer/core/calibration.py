@@ -99,7 +99,7 @@ class LinearCalibration:
 
 # Default offline calibrations per grating: ~200 nm window over 2048 pixels.
 # These are placeholders for development; replace with measured calibrations.
-def default_calibration(grating: str = "1200g/mm", n_pixels: int = 2048) -> LinearCalibration:
+def default_calibration(grating: str = "1200g/mm", n_pixels: int = 1024) -> LinearCalibration:
     presets = {
         "1200g/mm": dict(wl0_nm=200.0, nm_per_step=1.0e-3, nm_per_pixel=200.0 / n_pixels),
         "2400g/mm": dict(wl0_nm=200.0, nm_per_step=0.5e-3, nm_per_pixel=100.0 / n_pixels),

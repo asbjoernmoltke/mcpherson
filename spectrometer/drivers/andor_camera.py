@@ -23,6 +23,15 @@ from .base import CameraDriver
 # Where the Andor SDK2 DLLs live; override via configuration if needed.
 DEFAULT_ANDOR_SDK2_PATH = "C:/Program Files/Andor Driver Pack 2"
 
+# --- This system's camera: Andor Newton DO920P-BEN-995 (SDK2) -------------
+# Sensor: e2v CCD30-11, 1024 x 256 px, 26 um square pixels, 16-bit.
+# Full-well ~457,768 e-/pixel; read noise ~5-30 e- (A/D rate + preamp dependent).
+# Cooling: spec -100..-20 C, typical operating -80 C.
+NEWTON_WIDTH = 1024
+NEWTON_HEIGHT = 256
+NEWTON_PIXEL_UM = 26.0
+NEWTON_FULL_WELL_E = 457_768
+
 
 class AndorCamera(CameraDriver):
     """Thin wrapper over pylablib ``AndorSDK2Camera``.
@@ -144,7 +153,7 @@ class DummyCamera(CameraDriver):
     STABLE_TOL_C = 1.0
     RAMP_RATE_C_PER_S = 8.0  # simulated cooling/warming rate
 
-    def __init__(self, *, width: int = 2048, height: int = 512):
+    def __init__(self, *, width: int = NEWTON_WIDTH, height: int = NEWTON_HEIGHT):
         self._w = width
         self._h = height
         self._connected = False
