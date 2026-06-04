@@ -59,8 +59,15 @@ class SaveOptions:
     # scan wavelength range (for record_type == "scans")
     wl_min: float = 350.0
     wl_max: float = 500.0
+    # what to save (tickboxes):
+    save_image_2d: bool = False      # (a) raw 2-D image per shot
+    save_spectrum_1d: bool = False   # (b) raw 1-D spectrum per shot
+    save_stitched: bool = True       # (c) stitched 1-D spectrum per scan
     save_metadata: bool = True
     metadata_separate: bool = False
+
+    def content_selected(self) -> bool:
+        return self.save_image_2d or self.save_spectrum_1d or self.save_stitched
 
     def is_single(self) -> bool:
         """A single scan with count==1 -> single-file (CSV by default)."""
@@ -68,6 +75,9 @@ class SaveOptions:
                 and self.stop_mode == "count" and self.stop_count == 1)
 
     def resolved_format(self) -> str:
+        # 2-D image stacks can't go in CSV -> force HDF5.
+        if self.save_image_2d:
+            return "hdf5"
         if self.fmt != "auto":
             return self.fmt
         return "csv" if self.is_single() else "hdf5"
@@ -187,15 +197,28 @@ class Hdf5Recorder:
         self._n += 1
         self._f.flush()
 
-    def append_frame(self, frame, wavelength=None,
+    def append_frame(self, image=None, spectrum=None, wavelength=None,
                      item_meta: Optional[dict] = None) -> None:
+        """A 'shot' in a flat frame series: optional 2-D image and/or 1-D
+        spectrum, plus the wavelength axis."""
         g = self._f.create_group("frame_%04d" % self._n)
-        g.create_dataset("image", data=np.asarray(frame))
+        if image is not None:
+            g.create_dataset("image", data=np.asarray(image))
+        if spectrum is not None:
+            g.create_dataset("spectrum", data=np.asarray(spectrum))
         if wavelength is not None:
             g.create_dataset("wavelength_nm", data=np.asarray(wavelength))
         self._attrs(g, item_meta)
         self._n += 1
         self._f.flush()
+
+    def new_scan(self, scan_meta: Optional[dict] = None) -> "_Hdf5ScanGroup":
+        """Begin a scan group that holds per-shot data and/or the stitched
+        spectrum."""
+        g = self._f.create_group("scan_%04d" % self._n)
+        self._attrs(g, scan_meta)
+        self._n += 1
+        return _Hdf5ScanGroup(g, self._f)
 
     @staticmethod
     def _attrs(group, item_meta):
@@ -209,3 +232,31 @@ class Hdf5Recorder:
 
     def close(self) -> None:
         self._f.close()
+
+
+class _Hdf5ScanGroup:
+    """One scan's group: per-shot data under ``shot_NNNN`` + optional stitched."""
+
+    def __init__(self, group, file):
+        self._g = group
+        self._f = file
+        self._shot = 0
+
+    def add_shot(self, *, image=None, spectrum=None, wavelength=None,
+                 item_meta: Optional[dict] = None) -> None:
+        sg = self._g.create_group("shot_%04d" % self._shot)
+        if image is not None:
+            sg.create_dataset("image", data=np.asarray(image))
+        if spectrum is not None:
+            sg.create_dataset("spectrum", data=np.asarray(spectrum))
+        if wavelength is not None:
+            sg.create_dataset("wavelength_nm", data=np.asarray(wavelength))
+        if item_meta:
+            for k, v in item_meta.items():
+                sg.attrs[k] = _attr_value(v)
+        self._shot += 1
+
+    def set_stitched(self, wavelength, intensity) -> None:
+        self._g.create_dataset("stitched_wavelength_nm", data=np.asarray(wavelength))
+        self._g.create_dataset("stitched_intensity", data=np.asarray(intensity))
+        self._f.flush()

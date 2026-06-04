@@ -112,6 +112,45 @@ def test_record_single_scan_writes_csv(qapp, tmp_path):
         sys.close_all()
 
 
+def test_options_force_hdf5_for_2d_image():
+    o = SaveOptions("f", "n", fmt="csv", save_image_2d=True)
+    assert o.resolved_format() == "hdf5"          # 2-D forces HDF5
+
+
+def test_record_nothing_selected_raises(qapp, tmp_path):
+    sys = build_system(dummy=True)
+    sys.open_all()
+    try:
+        w = _worker(sys)
+        opts = SaveOptions(folder=str(tmp_path), filename="x", save_stitched=False)
+        with pytest.raises(Exception):
+            w._run_recording(opts)
+    finally:
+        sys.close_all()
+
+
+def test_record_scan_with_shots_image_and_spectrum(qapp, tmp_path):
+    h5py = pytest.importorskip("h5py")
+    sys = build_system(dummy=True)
+    sys.open_all()
+    try:
+        w = _worker(sys)
+        opts = SaveOptions(folder=str(tmp_path), filename="shots", fmt="hdf5",
+                           record_type="scans", stop_mode="count", stop_count=1,
+                           wl_min=350.0, wl_max=420.0, save_image_2d=True,
+                           save_spectrum_1d=True, save_stitched=True)
+        path = w._run_recording(opts)
+        with h5py.File(path, "r") as f:
+            g = f["scan_0000"]
+            assert "stitched_intensity" in g
+            shots = [k for k in g.keys() if k.startswith("shot_")]
+            assert shots
+            sg = g[shots[0]]
+            assert sg["image"].ndim == 2 and "spectrum" in sg and "wavelength_nm" in sg
+    finally:
+        sys.close_all()
+
+
 def test_record_scan_series_writes_hdf5(qapp, tmp_path):
     h5py = pytest.importorskip("h5py")
     sys = build_system(dummy=True)

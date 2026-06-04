@@ -12,8 +12,8 @@ from PyQt6.QtCore import QTime
 from PyQt6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog,
                              QDialogButtonBox, QDoubleSpinBox, QFileDialog,
                              QFormLayout, QGroupBox, QHBoxLayout, QLabel,
-                             QLineEdit, QPushButton, QRadioButton, QSpinBox,
-                             QTimeEdit, QVBoxLayout, QWidget)
+                             QLineEdit, QMessageBox, QPushButton, QRadioButton,
+                             QSpinBox, QTimeEdit, QVBoxLayout, QWidget)
 
 from ..core.storage import SaveOptions
 
@@ -51,6 +51,18 @@ class SaveDialog(QDialog):
         self._format.addItems(["auto (CSV single / HDF5 series)", "csv", "hdf5"])
         dest.addRow("Format:", self._format)
         layout.addLayout(dest)
+
+        # --- what to save ----------------------------------------------
+        content_box = QGroupBox("What to save")
+        cl = QVBoxLayout(content_box)
+        self._save_image = QCheckBox("Raw 2-D image per shot (forces HDF5)")
+        self._save_spectrum = QCheckBox("Raw 1-D spectrum per shot")
+        self._save_stitched = QCheckBox("Stitched 1-D spectrum per scan")
+        self._save_stitched.setChecked(True)
+        for w in (self._save_image, self._save_spectrum, self._save_stitched):
+            cl.addWidget(w)
+        self._save_image.toggled.connect(self._sync_format_constraint)
+        layout.addWidget(content_box)
 
         # --- operation mode --------------------------------------------
         mode_box = QGroupBox("Operation mode")
@@ -161,6 +173,16 @@ class SaveDialog(QDialog):
         scans = self._scans_radio.isChecked()
         self._scan_panel.setEnabled(scans)
         self._frame_panel.setEnabled(not scans)
+        # "stitched" only applies to scans.
+        self._save_stitched.setEnabled(scans)
+
+    def _sync_format_constraint(self) -> None:
+        # 2-D images can't go in CSV -> force HDF5 and lock the selector.
+        if self._save_image.isChecked():
+            self._format.setCurrentIndex(2)   # hdf5
+            self._format.setEnabled(False)
+        else:
+            self._format.setEnabled(True)
 
     def _browse(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Select folder",
@@ -168,14 +190,26 @@ class SaveDialog(QDialog):
         if folder:
             self._folder.setText(folder)
 
+    def accept(self) -> None:  # noqa: N802 (Qt signature)
+        scans = self._scans_radio.isChecked()
+        picked = (self._save_image.isChecked() or self._save_spectrum.isChecked()
+                  or (scans and self._save_stitched.isChecked()))
+        if not picked:
+            QMessageBox.warning(self, "Nothing to save",
+                                "Select at least one of image / spectrum / "
+                                "stitched to save.")
+            return
+        super().accept()
+
     # --- result --------------------------------------------------------
     def options(self) -> SaveOptions:
         fmt = ["auto", "csv", "hdf5"][self._format.currentIndex()]
+        scans = self._scans_radio.isChecked()
         return SaveOptions(
             folder=self._folder.text(),
             filename=self._filename.text(),
             fmt=fmt,
-            record_type="scans" if self._scans_radio.isChecked() else "frames",
+            record_type="scans" if scans else "frames",
             stop_mode="count" if self._stop_count_radio.isChecked() else "duration",
             stop_count=self._stop_count.value(),
             stop_duration_s=_seconds(self._stop_time),
@@ -184,6 +218,9 @@ class SaveDialog(QDialog):
             cadence_interval_s=_seconds(self._cad_int),
             wl_min=self._wl_min.value(),
             wl_max=self._wl_max.value(),
+            save_image_2d=self._save_image.isChecked(),
+            save_spectrum_1d=self._save_spectrum.isChecked(),
+            save_stitched=scans and self._save_stitched.isChecked(),
             save_metadata=self._save_meta.isChecked(),
             metadata_separate=self._meta_separate.isChecked(),
         )

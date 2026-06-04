@@ -186,93 +186,102 @@ class HardwareWorker(QObject):
             self._set_busy(False)
 
     def _run_recording(self, opts: storage.SaveOptions) -> str:
+        if not opts.content_selected():
+            raise SpectrometerError("Nothing selected to save (tick image / "
+                                    "spectrum / stitched).")
         run_meta = storage.collect_metadata(self.system) if opts.save_metadata else {}
         fmt = opts.resolved_format()
+        base = opts.base_path()
         if opts.record_type == "frames":
-            return self._record_frames(opts, run_meta, fmt)
-        return self._record_scans(opts, run_meta, fmt)
+            return self._record_frames(opts, run_meta, fmt, base)
+        return self._record_scans(opts, run_meta, fmt, base)
 
-    def _item_meta(self, index: int) -> dict:
-        return {"index": index, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "grating_position_steps": self.system.grating.position}
+    def _abort_check(self) -> None:
+        if self.system.abort.is_set() or self.system.safety.is_estopped:
+            raise EStopActive("Recording aborted.")
 
-    def _record_scans(self, opts, run_meta, fmt) -> str:
-        eng = self.system.engine
-        # Single scan -> one file (CSV by default).
-        if opts.is_single() and fmt == "csv":
-            path = opts.base_path() + ".csv"
-            wl, intensity = eng.scan(opts.wl_min, opts.wl_max)
-            storage.write_spectrum_csv(
-                path, wl, intensity,
-                metadata=run_meta or None, separate_metadata=opts.metadata_separate)
-            self.progress.emit(1, 1)
-            return path
-
-        # Series.
+    # --- scans: per-scan writer honours the a/b/c content flags --------
+    def _record_scans(self, opts, run_meta, fmt, base) -> str:
         if fmt == "hdf5":
-            path = opts.base_path() + ".h5"
+            path = base + ".h5"
             rec = storage.Hdf5Recorder(path, run_meta, opts.save_metadata)
             try:
-                self._scan_loop(opts, lambda i, wl, y:
-                                rec.append_spectrum(wl, y, self._item_meta(i)))
+                self._scan_series(opts, _Hdf5ScanWriter(rec, opts))
             finally:
                 rec.close()
             return path
-        # CSV series: numbered files + one sidecar metadata file.
+        # CSV (no 2-D images): stitched and/or per-shot 1-D spectra.
         if opts.save_metadata and run_meta:
-            storage.write_metadata_sidecar(opts.base_path() + ".csv", run_meta)
-        self._scan_loop(opts, lambda i, wl, y: storage.write_spectrum_csv(
-            "%s_%04d.csv" % (opts.base_path(), i), wl, y))
-        return opts.base_path() + "_*.csv"
+            storage.write_metadata_sidecar(base + ".csv", run_meta)
+        self._scan_series(opts, _CsvScanWriter(opts, base))
+        return (base + ".csv") if opts.is_single() else (base + "_*.csv")
 
-    def _scan_loop(self, opts, sink) -> None:
-        """Run scans per the stop mode, calling sink(index, wl, intensity)."""
+    def _scan_series(self, opts, writer) -> None:
         eng = self.system.engine
         deadline = (time.monotonic() + opts.stop_duration_s
                     if opts.stop_mode == "duration" else None)
         i = 0
         while True:
-            if self.system.abort.is_set() or self.system.safety.is_estopped:
-                raise EStopActive("Recording aborted.")
+            self._abort_check()
             if opts.stop_mode == "count" and i >= opts.stop_count:
                 break
             if deadline is not None and time.monotonic() >= deadline:
                 break
-            wl, intensity = eng.scan(opts.wl_min, opts.wl_max)
-            sink(i, wl, intensity)
+            writer.begin_scan(i)
+            eng.on_shot = writer.on_shot          # capture per-shot data
+            try:
+                grid, stitched = eng.scan(opts.wl_min, opts.wl_max)
+            finally:
+                eng.on_shot = None
+            writer.end_scan(i, grid, stitched)
             i += 1
-            total = opts.stop_count if opts.stop_mode == "count" else 0
-            self.progress.emit(i, total)
+            self.progress.emit(i, opts.stop_count if opts.stop_mode == "count" else 0)
 
-    def _record_frames(self, opts, run_meta, fmt) -> str:
-        # Frame time-series at the current grating position -> always HDF5.
-        path = opts.base_path() + ".h5"
-        rec = storage.Hdf5Recorder(path, run_meta, opts.save_metadata)
+    # --- frames: time-series of shots at the current position ----------
+    def _record_frames(self, opts, run_meta, fmt, base) -> str:
+        from ..core.acquisition import average_frames, reduce_frames
         cal = self.system.calibration
         sync = self.system.sync
+        n = self.system.engine.n_frames
+        csv = (fmt == "csv")
+        rec = None if csv else storage.Hdf5Recorder(path := base + ".h5",
+                                                    run_meta, opts.save_metadata)
+        if csv and opts.save_metadata and run_meta:
+            storage.write_metadata_sidecar(base + ".csv", run_meta)
         try:
-            k = 0
-            saved = 0
+            k = saved = 0
             while True:
-                if self.system.abort.is_set() or self.system.safety.is_estopped:
-                    raise EStopActive("Recording aborted.")
-                frames = sync.acquire(1)
-                frame = frames[-1] if frames.ndim == 3 else frames
+                self._abort_check()
+                frames = sync.acquire(n)
                 keep = (k % max(1, opts.cadence_n) == 0
                         if opts.cadence_mode == "every_nth" else True)
                 if keep:
-                    wl = cal.wavelength_axis(self.system.grating.position)
-                    rec.append_frame(frame, wl, self._item_meta(saved))
-                    self.frame_ready.emit(frame)
+                    pos = self.system.grating.position
+                    wl = cal.wavelength_axis(pos)
+                    image = average_frames(frames)
+                    spectrum = reduce_frames(frames)
+                    meta = {"index": saved, "position": pos,
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")}
+                    if csv:                       # spectrum only (no 2-D in CSV)
+                        if opts.save_spectrum_1d:
+                            storage.write_spectrum_csv(
+                                "%s_%04d.csv" % (base, saved), wl, spectrum)
+                    else:
+                        rec.append_frame(
+                            image=image if opts.save_image_2d else None,
+                            spectrum=spectrum if opts.save_spectrum_1d else None,
+                            wavelength=wl, item_meta=meta)
+                    self.frame_ready.emit(frames[-1] if frames.ndim == 3 else frames)
                     saved += 1
-                    self.progress.emit(saved, 0)   # 0 total -> indeterminate
+                    self.progress.emit(saved, 0)   # indeterminate
                 k += 1
                 if opts.cadence_mode == "every_interval":
                     if self.system.abort.wait(opts.cadence_interval_s):
                         raise EStopActive("Recording aborted.")
         finally:
-            rec.close()
-        return path
+            if rec is not None:
+                rec.close()
+        return (base + ".h5") if not csv else (base + "_*.csv")
 
     @pyqtSlot(float)
     def set_exposure(self, seconds: float) -> None:
@@ -312,3 +321,55 @@ class HardwareWorker(QObject):
             self.system.laser.set_repetition_rate_hz(hz)
         except Exception as exc:
             self.error.emit(str(exc))
+
+
+# --- per-scan writers: translate the a/b/c content flags to storage calls ---
+class _Hdf5ScanWriter:
+    """Writes a scan's per-shot data and/or stitched spectrum to HDF5."""
+
+    def __init__(self, recorder: storage.Hdf5Recorder, opts: storage.SaveOptions):
+        self.rec = recorder
+        self.opts = opts
+        self._sg = None
+
+    def begin_scan(self, i: int) -> None:
+        self._sg = self.rec.new_scan(
+            {"scan_index": i, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S")})
+
+    def on_shot(self, shot_index, position, image, wavelength, intensity) -> None:
+        if not (self.opts.save_image_2d or self.opts.save_spectrum_1d):
+            return
+        self._sg.add_shot(
+            image=image if self.opts.save_image_2d else None,
+            spectrum=intensity if self.opts.save_spectrum_1d else None,
+            wavelength=wavelength,
+            item_meta={"shot_index": shot_index, "position": position})
+
+    def end_scan(self, i, grid, stitched) -> None:
+        if self.opts.save_stitched:
+            self._sg.set_stitched(grid, stitched)
+
+
+class _CsvScanWriter:
+    """Writes a scan's stitched and/or per-shot 1-D spectra as CSV files
+    (no 2-D images -- those force HDF5)."""
+
+    def __init__(self, opts: storage.SaveOptions, base: str):
+        self.opts = opts
+        self.base = base
+        self._i = 0
+
+    def begin_scan(self, i: int) -> None:
+        self._i = i
+
+    def on_shot(self, shot_index, position, image, wavelength, intensity) -> None:
+        if self.opts.save_spectrum_1d:
+            storage.write_spectrum_csv(
+                "%s_scan%04d_shot%04d.csv" % (self.base, self._i, shot_index),
+                wavelength, intensity)
+
+    def end_scan(self, i, grid, stitched) -> None:
+        if self.opts.save_stitched:
+            name = ((self.base + ".csv") if self.opts.is_single()
+                    else "%s_%04d.csv" % (self.base, i))
+            storage.write_spectrum_csv(name, grid, stitched)

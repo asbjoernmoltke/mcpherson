@@ -29,12 +29,17 @@ from .sync import SyncController
 Segment = tuple[np.ndarray, np.ndarray]  # (wavelength_nm, intensity)
 
 
+def average_frames(frames: np.ndarray) -> np.ndarray:
+    """Average a frame stack ``(n, H, W)`` over the n exposures -> a single 2-D
+    image ``(H, W)`` (the 'shot'). A lone 2-D frame is returned unchanged."""
+    arr = np.asarray(frames, dtype=np.float64)
+    return arr.mean(axis=0) if arr.ndim == 3 else arr
+
+
 def reduce_frames(frames: np.ndarray) -> np.ndarray:
     """Reduce a frame stack ``(n, H, W)`` (or ``(H, W)``) to a 1-D spectrum of
     length ``W`` by averaging over frames and vertical (spatial) rows."""
-    arr = np.asarray(frames, dtype=np.float64)
-    if arr.ndim == 3:
-        arr = arr.mean(axis=0)
+    arr = average_frames(frames)
     if arr.ndim == 2:
         arr = arr.mean(axis=0)
     return arr
@@ -95,6 +100,9 @@ class AcquisitionEngine:
     on_progress: Optional[Callable[[int, int], None]] = None
     on_finished: Optional[Callable[[], None]] = None
     on_aborted: Optional[Callable[[], None]] = None
+    # per-shot hook: (shot_index, position, image2d, wavelength, intensity).
+    # Used by the recorder to save raw 2-D images / 1-D spectra per shot.
+    on_shot: Optional[Callable[[int, int, np.ndarray, np.ndarray, np.ndarray], None]] = None
 
     _emit_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
@@ -120,6 +128,8 @@ class AcquisitionEngine:
         position = self.grating.position
         wl = self.calibration.wavelength_axis(position)
         intensity = reduce_frames(frames)
+        if self.on_shot:
+            self.on_shot(0, position, average_frames(frames), wl, intensity)
         self._emit_spectrum(wl, intensity)
         return wl, intensity
 
@@ -142,6 +152,9 @@ class AcquisitionEngine:
                 self._emit_frame(frames[-1] if frames.ndim == 3 else frames)
                 wl = self.calibration.wavelength_axis(self.grating.position)
                 intensity = reduce_frames(frames)
+                if self.on_shot:
+                    self.on_shot(i, int(self.grating.position),
+                                 average_frames(frames), wl, intensity)
                 segments.append((wl, intensity))
                 if self.on_progress:
                     self.on_progress(i + 1, total)
