@@ -238,6 +238,7 @@ class AcquisitionPanel(QGroupBox):
     single_requested = pyqtSignal()
     scan_requested = pyqtSignal(float, float)
     abort_requested = pyqtSignal()
+    record_requested = pyqtSignal()
 
     def __init__(self):
         super().__init__("Acquisition")
@@ -264,9 +265,11 @@ class AcquisitionPanel(QGroupBox):
         row = QHBoxLayout()
         self._single_btn = QPushButton("Single")
         self._scan_btn = QPushButton("Scan")
+        self._record_btn = QPushButton("Record…")
         self._abort_btn = QPushButton("Abort")
         row.addWidget(self._single_btn)
         row.addWidget(self._scan_btn)
+        row.addWidget(self._record_btn)
         row.addWidget(self._abort_btn)
         layout.addLayout(row)
 
@@ -286,6 +289,7 @@ class AcquisitionPanel(QGroupBox):
         self._scan_btn.clicked.connect(
             lambda: self.scan_requested.emit(self._wl_min.value(),
                                              self._wl_max.value()))
+        self._record_btn.clicked.connect(self.record_requested.emit)
         self._abort_btn.clicked.connect(self.abort_requested.emit)
 
     @property
@@ -306,7 +310,12 @@ class AcquisitionPanel(QGroupBox):
         ready = self._can_acquire and not self._busy
         self._single_btn.setEnabled(ready)
         self._scan_btn.setEnabled(ready)
+        self._record_btn.setEnabled(ready)
         self._abort_btn.setEnabled(self._busy)
+
+    @property
+    def wl_range(self) -> tuple[float, float]:
+        return self._wl_min.value(), self._wl_max.value()
         if self._busy:
             self._hint.setText("")
         elif not self._can_acquire:

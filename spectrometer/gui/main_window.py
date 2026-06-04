@@ -33,6 +33,7 @@ class MainWindow(QMainWindow):
     _laser_power = pyqtSignal(float)
     _pulse_picker = pyqtSignal(int)
     _rep_rate = pyqtSignal(float)
+    _record = pyqtSignal(object)
     _start_polling = pyqtSignal()
 
     def __init__(self, system: System):
@@ -103,6 +104,7 @@ class MainWindow(QMainWindow):
         self._laser_power.connect(w.set_laser_power)
         self._pulse_picker.connect(w.set_pulse_picker)
         self._rep_rate.connect(w.set_rep_rate)
+        self._record.connect(w.do_record)
         self._start_polling.connect(w.start_status_polling)
 
         # panels -> local re-emit (so emission happens on the GUI thread)
@@ -120,6 +122,7 @@ class MainWindow(QMainWindow):
         self.acq_panel.single_requested.connect(self._on_single)
         self.acq_panel.scan_requested.connect(self._on_scan)
         self.acq_panel.abort_requested.connect(self._on_abort)
+        self.acq_panel.record_requested.connect(self._on_record)
 
         # E-stop: direct, not via worker thread
         self.estop_btn.clicked.connect(self._on_estop)
@@ -133,6 +136,8 @@ class MainWindow(QMainWindow):
         w.alarm.connect(self.banner.show_alarm)
         w.error.connect(self._on_error)
         w.scan_aborted.connect(self._on_scan_aborted)
+        w.record_finished.connect(self._on_record_finished)
+        w.record_aborted.connect(self._on_scan_aborted)
 
     # --- handlers ------------------------------------------------------
     def _on_status(self, snapshot: dict) -> None:
@@ -149,8 +154,19 @@ class MainWindow(QMainWindow):
         self.system.engine.n_frames = self.acq_panel.n_frames
         self._scan.emit(lo, hi)
 
+    def _on_record(self) -> None:
+        from .save_dialog import SaveDialog
+        wl_min, wl_max = self.acq_panel.wl_range
+        dialog = SaveDialog(self, wl_min=wl_min, wl_max=wl_max)
+        if dialog.exec():
+            self.system.engine.n_frames = self.acq_panel.n_frames
+            self._record.emit(dialog.options())
+
+    def _on_record_finished(self, path: str) -> None:
+        QMessageBox.information(self, "Recording complete", "Saved to:\n%s" % path)
+
     def _on_abort(self) -> None:
-        # Cleanly abort a running scan without latching the full E-stop.
+        # Cleanly abort a running scan/recording without latching the E-stop.
         self.system.abort.set()
 
     def _on_scan_aborted(self) -> None:

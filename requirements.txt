@@ -2,6 +2,7 @@
 numpy>=1.24
 scipy>=1.10
 pyserial>=3.5
+h5py>=3.8          # HDF5 output for repeated measurements
 
 # Camera / instrument control
 pylablib>=1.4        # Andor SDK2 camera wrapper (real hardware only)

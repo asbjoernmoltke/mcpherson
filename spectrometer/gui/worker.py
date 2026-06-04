@@ -13,10 +13,13 @@ channels independent of the in-progress grating transaction.
 """
 from __future__ import annotations
 
+import time
+
 import numpy as np
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
 
 from ..core.exceptions import EStopActive, InterlockError, SpectrometerError
+from ..core import storage
 from ..core.system import System
 from ..utilities import log
 
@@ -28,6 +31,8 @@ class HardwareWorker(QObject):
     progress = pyqtSignal(int, int)
     scan_finished = pyqtSignal()
     scan_aborted = pyqtSignal()
+    record_finished = pyqtSignal(str)   # output path
+    record_aborted = pyqtSignal()
 
     # status + notifications
     status_updated = pyqtSignal(dict)
@@ -162,6 +167,112 @@ class HardwareWorker(QObject):
             self.error.emit(str(exc))
         finally:
             self._set_busy(False)
+
+    # --- recording (data saving) --------------------------------------
+    @pyqtSlot(object)
+    def do_record(self, opts: storage.SaveOptions) -> None:
+        self._set_busy(True)
+        self.system.abort.clear()       # fresh run
+        try:
+            path = self._run_recording(opts)
+            self.record_finished.emit(path)
+        except EStopActive:
+            self.record_aborted.emit()
+        except SpectrometerError as exc:
+            self.error.emit(str(exc))
+        except Exception as exc:        # storage/io errors
+            self.error.emit("Recording failed: %s" % exc)
+        finally:
+            self._set_busy(False)
+
+    def _run_recording(self, opts: storage.SaveOptions) -> str:
+        run_meta = storage.collect_metadata(self.system) if opts.save_metadata else {}
+        fmt = opts.resolved_format()
+        if opts.record_type == "frames":
+            return self._record_frames(opts, run_meta, fmt)
+        return self._record_scans(opts, run_meta, fmt)
+
+    def _item_meta(self, index: int) -> dict:
+        return {"index": index, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "grating_position_steps": self.system.grating.position}
+
+    def _record_scans(self, opts, run_meta, fmt) -> str:
+        eng = self.system.engine
+        # Single scan -> one file (CSV by default).
+        if opts.is_single() and fmt == "csv":
+            path = opts.base_path() + ".csv"
+            wl, intensity = eng.scan(opts.wl_min, opts.wl_max)
+            storage.write_spectrum_csv(
+                path, wl, intensity,
+                metadata=run_meta or None, separate_metadata=opts.metadata_separate)
+            self.progress.emit(1, 1)
+            return path
+
+        # Series.
+        if fmt == "hdf5":
+            path = opts.base_path() + ".h5"
+            rec = storage.Hdf5Recorder(path, run_meta, opts.save_metadata)
+            try:
+                self._scan_loop(opts, lambda i, wl, y:
+                                rec.append_spectrum(wl, y, self._item_meta(i)))
+            finally:
+                rec.close()
+            return path
+        # CSV series: numbered files + one sidecar metadata file.
+        if opts.save_metadata and run_meta:
+            storage.write_metadata_sidecar(opts.base_path() + ".csv", run_meta)
+        self._scan_loop(opts, lambda i, wl, y: storage.write_spectrum_csv(
+            "%s_%04d.csv" % (opts.base_path(), i), wl, y))
+        return opts.base_path() + "_*.csv"
+
+    def _scan_loop(self, opts, sink) -> None:
+        """Run scans per the stop mode, calling sink(index, wl, intensity)."""
+        eng = self.system.engine
+        deadline = (time.monotonic() + opts.stop_duration_s
+                    if opts.stop_mode == "duration" else None)
+        i = 0
+        while True:
+            if self.system.abort.is_set() or self.system.safety.is_estopped:
+                raise EStopActive("Recording aborted.")
+            if opts.stop_mode == "count" and i >= opts.stop_count:
+                break
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            wl, intensity = eng.scan(opts.wl_min, opts.wl_max)
+            sink(i, wl, intensity)
+            i += 1
+            total = opts.stop_count if opts.stop_mode == "count" else 0
+            self.progress.emit(i, total)
+
+    def _record_frames(self, opts, run_meta, fmt) -> str:
+        # Frame time-series at the current grating position -> always HDF5.
+        path = opts.base_path() + ".h5"
+        rec = storage.Hdf5Recorder(path, run_meta, opts.save_metadata)
+        cal = self.system.calibration
+        sync = self.system.sync
+        try:
+            k = 0
+            saved = 0
+            while True:
+                if self.system.abort.is_set() or self.system.safety.is_estopped:
+                    raise EStopActive("Recording aborted.")
+                frames = sync.acquire(1)
+                frame = frames[-1] if frames.ndim == 3 else frames
+                keep = (k % max(1, opts.cadence_n) == 0
+                        if opts.cadence_mode == "every_nth" else True)
+                if keep:
+                    wl = cal.wavelength_axis(self.system.grating.position)
+                    rec.append_frame(frame, wl, self._item_meta(saved))
+                    self.frame_ready.emit(frame)
+                    saved += 1
+                    self.progress.emit(saved, 0)   # 0 total -> indeterminate
+                k += 1
+                if opts.cadence_mode == "every_interval":
+                    if self.system.abort.wait(opts.cadence_interval_s):
+                        raise EStopActive("Recording aborted.")
+        finally:
+            rec.close()
+        return path
 
     @pyqtSlot(float)
     def set_exposure(self, seconds: float) -> None:
