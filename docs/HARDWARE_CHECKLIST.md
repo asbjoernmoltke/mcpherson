@@ -13,38 +13,42 @@ Legend: ⚠️ = safety-critical · 🔧 = needed for correct operation · 📋 
 Control path: NKTPDLL Interbus SDK (`C:\Users\Public\Documents\NKT Photonics\SDK`),
 wrapper `NKTP_DLL.py`. Driver: `spectrometer/drivers/laser_nkt.py`.
 
-**CONFIRMED:** module **type `0x95` "Origami XPS"** at **COM6** (FTDI), address
-15 (`tests/discover_nkt.py`). Register map verified live (`tests/origami_status.py`)
-against SDK `Register Files/95.txt`. Driver: `OrigamiXPS` in `laser_nkt.py`
-(one connection; Interbus forbids a 2nd opener of the port).
+**CONFIRMED:** module **type `0x95` "Origami XPS"** at **COM6** (FTDI), address 15.
+The laser speaks one of two mutually-exclusive interfaces on its port, selected
+by Interbus reg `0x39` (0=NKTPBus, 1=CLI):
 
-Register map (Origami XPS): `0x30` FSM target state [1,3,5,6] (emission is a
-state machine; **state 1 = OFF confirmed**), `0x34` internal shutter [0,1],
-`0x35` rep-rate index [0-12] (**index 0 = 50 kHz confirmed**), `0x36`
-frequency-division pulse picker [1-1,000,000] (U32), `0x05` relative power
-[0-4000], `0x02/0x03` actual PRR (read), `0x66` status (bit0=Emission On),
-`0x32` interlock, `0x67` error.
+* **CLI (38400 ASCII) — PRIMARY.** Driver `OrigamiCLI` (`laser_origami_cli.py`).
+  Unambiguous and DLL-free; resolves the earlier guesses. `ly_oxp2_standby/enabled`
+  (emission), `ly_oxp2_output_enable/disable` (AOM fast gate, used in E-stop),
+  `e_power=<0-4000>` (AOM/relative power → GUI %), `ly_oxp2_power=<W>` (pump power),
+  `e_freq` + **`e_freq_available?`** (rep rate + queryable allowed list), `e_div`
+  (pulse picker), `e_mlp?` (measured power).
+* **Interbus (NKTPDLL) — retained.** Driver `OrigamiXPS` (`laser_nkt.py`), reg map
+  from `95.txt`: `0x30` FSM (1=OFF confirmed), `0x34` shutter/AOM, `0x35` rep index
+  (0=50 kHz), `0x36` U32 pulse picker, `0x05` relative power, `0x66` status.
 
-| ✓ | Item | Why | Current value | Where to set |
-|---|------|-----|---------------|--------------|
-| ☑ | ⚠️ **Module type / port / address** | Selects register map | `0x95` @ COM6 addr 15 (auto-detected) | confirmed |
-| ☑ | ⚠️ **Emission OFF** | E-stop kills the beam | shutter `0x34`=0 **and** FSM `0x30`=1 (both confirmed) | `OrigamiXPS.disable()` |
-| ☐ | ⚠️ **Emission RUN FSM state** | `enable()` must reach full emission | `FSM_RUN=6` (valid [1,3,5,6]) — **CONFIRM vs 3/5** | `OrigamiXPS.FSM_RUN` |
-| ☐ | 🔧 **Power full-scale** (`0x05`=4000 ⇒ 100 %?) | Correct power % scaling | `POWER_FULL_SCALE=4000` — confirm | `OrigamiXPS.POWER_FULL_SCALE` |
-| ☐ | 🔧 **Rep-rate index→kHz table** | Map indices 1-10 to 100-1000 kHz (index 0=50 confirmed) | assumed 1=100…10=1000 | `OrigamiXPS.REP_RATE_INDEX_HZ` |
-| ☑ | 📋 **Pulse picker** | Frequency-division factor, 1/1..1/1,000,000 | reg `0x36` (U32) | confirmed |
-| ☐ | 📋 **Sync/analog channel** | Currently unused | not read | future `read_sync()` hook |
+`build_devices(laser_interface="cli"|"interbus")` selects; `origami_mode.ensure_mode`
+switches the laser into the matching mode at startup.
 
-**Controls in `OrigamiXPS`:** `enable` (FSM→RUN + open shutter) / `disable`
-(close shutter + FSM→OFF, the E-stop), `set/read_power_percent`,
-`set/read_pulse_picker_ratio` (U32), discrete `set/read_repetition_rate_hz`
-(via index), `read_status_bits`, `reset_interlock`, `emission_stage`.
+| ✓ | Item | Why | Status |
+|---|------|-----|--------|
+| ☑ | ⚠️ **Module / port / interface** | Selects driver | `0x95` @ COM6; CLI primary |
+| ☑ | ⚠️ **Emission OFF (E-stop)** | Kill beam | CLI: AOM disable + standby · Interbus: `0x34`=0 + FSM=1 (confirmed) |
+| ☑ | ⚠️ **Emission ON** | Start emission | CLI `ly_oxp2_enabled` (unambiguous; no FSM guess) |
+| ☑ | 🔧 **Rep-rate set + allowed list** | Discrete rates | CLI `e_freq` / `e_freq_available?` (queried at runtime) |
+| ☑ | 📋 **Pulse picker** | 1/1..1/1,000,000 | CLI `e_div` / Interbus `0x36` |
+| ☐ | 🔧 **AOM power (`e_power`) → actual output** | Calibrate the 0-4000 knob vs a power meter (firmware nJ vs mW; rep-rate-dependent max) | use `tests/origami_power_test.py` |
+| ☐ | 🔧 **Max pump power (W)** | Bound `ly_oxp2_power` | `OrigamiCLI(max_pump_power_w=5.0)` — confirm |
+| ☐ | 📋 **Interbus-only unknowns** | Only if using Interbus: FSM RUN state, rep-index table, `0x05` scaling | `OrigamiXPS` constants |
 
-**To confirm the 3 remaining unknowns:** in NKT CONTROL, note which target
-state runs emission (→ `FSM_RUN`); set power to a known % and read `0x05`
-(→ scaling); step the rep rate and re-run `tests/origami_status.py` to read
-`0x03` per index (→ index table). Then bench-verify `enable`/`disable` with the
-beam safely dumped before trusting the E-stop.
+**Controls (`OrigamiCLI`):** `enable`/`disable` (E-stop = AOM off + standby),
+`set/read_power_percent` (AOM), `set/read_pump_power_watts`,
+`read_average_power_watts`, `set/read_pulse_picker_ratio`,
+`set/read_repetition_rate_hz` (+ `allowed_rep_rates_hz` queried live).
+
+**Remaining: calibrate the AOM power knob** with `tests/origami_power_test.py`
+against a meter (which register/units actually drive output), and confirm the
+max pump power. Then bench-verify enable/disable with the beam dumped.
 
 ---
 
