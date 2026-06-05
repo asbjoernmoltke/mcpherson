@@ -249,6 +249,7 @@ class AcquisitionPanel(QGroupBox):
     scan_requested = pyqtSignal(float, float)
     abort_requested = pyqtSignal()
     record_requested = pyqtSignal()
+    live_toggled = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__("Acquisition")
@@ -275,12 +276,13 @@ class AcquisitionPanel(QGroupBox):
         row = QHBoxLayout()
         self._single_btn = QPushButton("Single")
         self._scan_btn = QPushButton("Scan")
+        self._live_btn = QPushButton("Live")
+        self._live_btn.setCheckable(True)
         self._record_btn = QPushButton("Record…")
         self._abort_btn = QPushButton("Abort")
-        row.addWidget(self._single_btn)
-        row.addWidget(self._scan_btn)
-        row.addWidget(self._record_btn)
-        row.addWidget(self._abort_btn)
+        for b in (self._single_btn, self._scan_btn, self._live_btn,
+                  self._record_btn, self._abort_btn):
+            row.addWidget(b)
         layout.addLayout(row)
 
         # Reason shown when acquisition is blocked (e.g. camera not cooled).
@@ -300,6 +302,7 @@ class AcquisitionPanel(QGroupBox):
             lambda: self.scan_requested.emit(self._wl_min.value(),
                                              self._wl_max.value()))
         self._record_btn.clicked.connect(self.record_requested.emit)
+        self._live_btn.toggled.connect(self.live_toggled.emit)
         self._abort_btn.clicked.connect(self.abort_requested.emit)
 
     @property
@@ -326,11 +329,21 @@ class AcquisitionPanel(QGroupBox):
         self._single_btn.setEnabled(ready)
         self._scan_btn.setEnabled(ready)
         self._record_btn.setEnabled(ready)
+        # Live can always be stopped while active; otherwise needs an idle bus.
+        self._live_btn.setEnabled(self._live_btn.isChecked() or not self._busy)
         self._abort_btn.setEnabled(self._busy)
 
     @property
     def wl_range(self) -> tuple[float, float]:
         return self._wl_min.value(), self._wl_max.value()
+
+    def set_live(self, on: bool) -> None:
+        """Programmatically reflect the live state (e.g. stopped by E-stop)
+        without re-emitting ``live_toggled``."""
+        self._live_btn.blockSignals(True)
+        self._live_btn.setChecked(on)
+        self._live_btn.blockSignals(False)
+        self._refresh_buttons()
         if self._busy:
             self._hint.setText("")
         elif not self._can_acquire:

@@ -13,6 +13,7 @@ channels independent of the in-progress grating transaction.
 """
 from __future__ import annotations
 
+import threading
 import time
 
 import numpy as np
@@ -33,6 +34,7 @@ class HardwareWorker(QObject):
     scan_aborted = pyqtSignal()
     record_finished = pyqtSignal(str)   # output path
     record_aborted = pyqtSignal()
+    live_stopped = pyqtSignal()
 
     # status + notifications
     status_updated = pyqtSignal(dict)
@@ -45,6 +47,7 @@ class HardwareWorker(QObject):
         self.system = system
         self._timer: QTimer | None = None
         self._busy = False
+        self._live_stop = threading.Event()
 
         eng = system.engine
         eng.on_frame = self.frame_ready.emit
@@ -167,6 +170,51 @@ class HardwareWorker(QObject):
             self.error.emit(str(exc))
         finally:
             self._set_busy(False)
+
+    # --- live view ----------------------------------------------------
+    @pyqtSlot()
+    def do_live(self) -> None:
+        """Continuous preview: open the shutter, stream the camera's newest
+        frame (and its reduced spectrum) until stopped, then close up. Runs on
+        the worker thread; ``stop_live`` (called from the GUI thread) ends it,
+        as does an E-stop/abort."""
+        from ..core.acquisition import reduce_frames
+        if self._busy:
+            self.error.emit("Busy; stop the current operation first.")
+            self.live_stopped.emit()
+            return
+        self._live_stop.clear()
+        self.system.abort.clear()
+        self._set_busy(True)
+        cam = self.system.camera.driver
+        try:
+            self.system.shutter.open()
+            cam.start_acquisition()
+            while not self._live_stop.is_set():
+                if self.system.abort.is_set() or self.system.safety.is_estopped:
+                    break
+                img = cam.read_newest_image()
+                if img is not None:
+                    self.frame_ready.emit(img)
+                    wl = self.system.calibration.wavelength_axis(
+                        self.system.grating.position)
+                    self.spectrum_ready.emit(wl, reduce_frames(img))
+                self._live_stop.wait(0.03)   # ~30 fps, interruptible
+        except Exception as exc:
+            self.error.emit("Live view failed: %s" % exc)
+        finally:
+            try:
+                cam.stop_acquisition()
+            except Exception:  # pragma: no cover
+                pass
+            self.system.shutter.close()
+            self._set_busy(False)
+            self.live_stopped.emit()
+
+    def stop_live(self) -> None:
+        """Stop live view. Plain method (not a slot) so the GUI thread can set
+        the flag while the worker thread is busy in the live loop."""
+        self._live_stop.set()
 
     # --- recording (data saving) --------------------------------------
     @pyqtSlot(object)

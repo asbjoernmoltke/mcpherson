@@ -18,8 +18,10 @@ vacuum all have real drivers; **shutter** is still dummy-only). See
 - [ ] **3. Settings / state persistence** — `core/state.py` (planned Layer 4):
   remember last exposure, grating, setpoint, scan range, ports, save folder.
   Use `utilities/config.py` (currently unused).
-- [ ] **4. Live-view mode** — continuous preview via the camera's
-  `start_acquisition`/`read_newest_image`, wired to a "Live" button.
+- [x] **4. Live-view mode** — continuous preview via the camera's
+  `start_acquisition`/`read_newest_image`, wired to a "Live" toggle button.
+  Opens the shutter while live, streams frame + reduced spectrum, stops on
+  toggle/abort/E-stop.
 
 ## Controller / lifecycle hardening (code-only)
 

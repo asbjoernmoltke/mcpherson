@@ -34,6 +34,7 @@ class MainWindow(QMainWindow):
     _pulse_picker = pyqtSignal(int)
     _rep_rate = pyqtSignal(float)
     _record = pyqtSignal(object)
+    _live = pyqtSignal()
     _start_polling = pyqtSignal()
 
     def __init__(self, system: System, settings=None):
@@ -121,6 +122,7 @@ class MainWindow(QMainWindow):
         self._pulse_picker.connect(w.set_pulse_picker)
         self._rep_rate.connect(w.set_rep_rate)
         self._record.connect(w.do_record)
+        self._live.connect(w.do_live)
         self._start_polling.connect(w.start_status_polling)
 
         # panels -> local re-emit (so emission happens on the GUI thread)
@@ -139,6 +141,7 @@ class MainWindow(QMainWindow):
         self.acq_panel.scan_requested.connect(self._on_scan)
         self.acq_panel.abort_requested.connect(self._on_abort)
         self.acq_panel.record_requested.connect(self._on_record)
+        self.acq_panel.live_toggled.connect(self._on_live_toggled)
 
         # E-stop: direct, not via worker thread
         self.estop_btn.clicked.connect(self._on_estop)
@@ -154,6 +157,7 @@ class MainWindow(QMainWindow):
         w.scan_aborted.connect(self._on_scan_aborted)
         w.record_finished.connect(self._on_record_finished)
         w.record_aborted.connect(self._on_scan_aborted)
+        w.live_stopped.connect(lambda: self.acq_panel.set_live(False))
 
     # --- handlers ------------------------------------------------------
     def _on_status(self, snapshot: dict) -> None:
@@ -184,6 +188,12 @@ class MainWindow(QMainWindow):
     def _on_record_finished(self, path: str) -> None:
         QMessageBox.information(self, "Recording complete", "Saved to:\n%s" % path)
 
+    def _on_live_toggled(self, on: bool) -> None:
+        if on:
+            self._live.emit()           # queued -> worker starts streaming
+        else:
+            self.worker.stop_live()     # direct -> sets the stop flag
+
     def _on_abort(self) -> None:
         # Cleanly abort a running scan/recording without latching the E-stop.
         self.system.abort.set()
@@ -205,6 +215,7 @@ class MainWindow(QMainWindow):
     # --- shutdown ------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
         self._collect_settings()   # capture UI values; app.run_gui saves them
+        self.worker.stop_live()    # end live view if running
         self.system.abort.set()
         # Stop the status timer inside the worker thread first, so Qt never
         # tries to kill a timer from another thread on teardown.
