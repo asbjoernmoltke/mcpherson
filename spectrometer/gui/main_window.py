@@ -28,6 +28,11 @@ class MainWindow(QMainWindow):
     _single = pyqtSignal()
     _scan = pyqtSignal(float, float)
     _exposure = pyqtSignal(float)
+    _trigger = pyqtSignal(str)
+    _internal_shutter = pyqtSignal(str)
+    _readout = pyqtSignal(int)
+    _preamp = pyqtSignal(int)
+    _em_gain = pyqtSignal(int)
     _shutter = pyqtSignal(bool)
     _laser = pyqtSignal(bool)
     _laser_power = pyqtSignal(float)
@@ -67,6 +72,7 @@ class MainWindow(QMainWindow):
 
         self._connect()
         self._apply_settings()
+        self._apply_capabilities()
         self._start_polling.emit()  # queued -> starts the worker's status timer
 
     # --- settings <-> UI ----------------------------------------------
@@ -74,6 +80,13 @@ class MainWindow(QMainWindow):
         s = self.settings
         self.camera_panel.apply_settings(s.cooling_setpoint_c, s.exposure_s)
         self.acq_panel.apply_settings(s.scan_wl_min, s.scan_wl_max, s.n_frames)
+
+    def _apply_capabilities(self) -> None:
+        """Populate the camera config dropdowns from the (open) device."""
+        try:
+            self.camera_panel.set_capabilities(self.system.camera.capabilities())
+        except Exception:  # pragma: no cover - device not open / unsupported
+            pass
 
     def _collect_settings(self) -> None:
         s = self.settings
@@ -116,6 +129,11 @@ class MainWindow(QMainWindow):
         self._single.connect(w.do_single)
         self._scan.connect(w.do_scan)
         self._exposure.connect(w.set_exposure)
+        self._trigger.connect(w.set_trigger_mode)
+        self._internal_shutter.connect(w.set_internal_shutter)
+        self._readout.connect(w.set_readout_rate)
+        self._preamp.connect(w.set_preamp_gain)
+        self._em_gain.connect(w.set_em_gain)
         self._shutter.connect(w.set_shutter)
         self._laser.connect(w.set_laser)
         self._laser_power.connect(w.set_laser_power)
@@ -129,6 +147,11 @@ class MainWindow(QMainWindow):
         self.camera_panel.cooldown_requested.connect(self._cooldown.emit)
         self.camera_panel.warmup_requested.connect(self._warmup.emit)
         self.camera_panel.exposure_changed.connect(self._exposure.emit)
+        self.camera_panel.trigger_changed.connect(self._trigger.emit)
+        self.camera_panel.internal_shutter_changed.connect(self._internal_shutter.emit)
+        self.camera_panel.readout_changed.connect(self._readout.emit)
+        self.camera_panel.preamp_changed.connect(self._preamp.emit)
+        self.camera_panel.em_gain_changed.connect(self._em_gain.emit)
         self.grating_panel.home_requested.connect(self._home.emit)
         self.grating_panel.goto_requested.connect(self._goto.emit)
         self.grating_panel.stop_requested.connect(self._on_grating_stop)

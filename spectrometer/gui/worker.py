@@ -47,6 +47,7 @@ class HardwareWorker(QObject):
         self.system = system
         self._timer: QTimer | None = None
         self._busy = False
+        self._warming = False           # non-blocking warm-up in progress
         self._live_stop = threading.Event()
 
         eng = system.engine
@@ -79,15 +80,19 @@ class HardwareWorker(QObject):
         try:
             s.vacuum.poll()
             s.safety.check_vacuum_while_cold()
+            self._drive_warmup()        # non-blocking warm-up state machine
             snapshot = {
                 "camera": s.camera.status,
                 "temperature": s.camera.temperature,
                 "cooler_on": s.devices.camera.is_cooler_on(),
                 "stable": s.devices.camera.is_temperature_stable(),
                 "cooled": s.camera.is_cooled,
+                "cool_progress": s.camera.cooldown_progress(),
+                "warming": self._warming,
                 "can_acquire": s.safety.can_acquire,
                 "grating": s.grating.status,
                 "position": s.grating.position,
+                "homed": s.grating.is_homed,
                 "shutter": s.shutter.status,
                 "shutter_open": s.shutter.is_open,
                 "laser": s.laser.status,
@@ -116,6 +121,7 @@ class HardwareWorker(QObject):
 
     @pyqtSlot(float)
     def do_cooldown(self, setpoint_c: float) -> None:
+        self._warming = False           # a new cooldown cancels any warm-up
         try:
             self.system.safety.assert_can_cool()
             self.system.camera.cooldown(setpoint_c)
@@ -124,11 +130,22 @@ class HardwareWorker(QObject):
 
     @pyqtSlot()
     def do_warmup(self) -> None:
-        self._set_busy(True)
+        """Begin a controlled warm-up. Non-blocking: the cooler is raised to
+        the warm target now and switched off later by ``_drive_warmup`` once
+        the sensor is warm, so the GUI/status keep updating throughout."""
         try:
-            self.system.camera.safe_shutdown()
-        finally:
-            self._set_busy(False)
+            self.system.camera.begin_warmup()
+            self._warming = True
+        except Exception as exc:        # pragma: no cover - defensive
+            self.error.emit("Warm-up failed to start: %s" % exc)
+
+    def _drive_warmup(self) -> None:
+        if not self._warming:
+            return
+        cam = self.system.camera
+        if not self.system.devices.camera.is_cooler_on() or cam.is_warm_enough():
+            cam.finish_shutdown()
+            self._warming = False
 
     @pyqtSlot()
     def do_home(self) -> None:
@@ -334,6 +351,41 @@ class HardwareWorker(QObject):
     @pyqtSlot(float)
     def set_exposure(self, seconds: float) -> None:
         self.system.camera.configure(exposure_s=seconds)
+
+    @pyqtSlot(str)
+    def set_trigger_mode(self, mode: str) -> None:
+        try:
+            self.system.camera.configure(trigger_mode=mode)
+        except Exception as exc:
+            self.error.emit("Trigger mode failed: %s" % exc)
+
+    @pyqtSlot(str)
+    def set_internal_shutter(self, mode: str) -> None:
+        try:
+            self.system.camera.configure(internal_shutter=mode)
+        except Exception as exc:
+            self.error.emit("Internal shutter failed: %s" % exc)
+
+    @pyqtSlot(int)
+    def set_readout_rate(self, index: int) -> None:
+        try:
+            self.system.camera.configure(readout_index=index)
+        except Exception as exc:
+            self.error.emit("Readout rate failed: %s" % exc)
+
+    @pyqtSlot(int)
+    def set_preamp_gain(self, index: int) -> None:
+        try:
+            self.system.camera.configure(preamp_index=index)
+        except Exception as exc:
+            self.error.emit("Pre-amp gain failed: %s" % exc)
+
+    @pyqtSlot(int)
+    def set_em_gain(self, value: int) -> None:
+        try:
+            self.system.camera.configure(em_gain=value)
+        except Exception as exc:
+            self.error.emit("EM gain failed: %s" % exc)
 
     @pyqtSlot(bool)
     def set_shutter(self, open_: bool) -> None:

@@ -23,6 +23,11 @@ class CameraPanel(QGroupBox):
     cooldown_requested = pyqtSignal(float)
     warmup_requested = pyqtSignal()
     exposure_changed = pyqtSignal(float)
+    trigger_changed = pyqtSignal(str)
+    internal_shutter_changed = pyqtSignal(str)
+    readout_changed = pyqtSignal(int)
+    preamp_changed = pyqtSignal(int)
+    em_gain_changed = pyqtSignal(int)
 
     def __init__(self):
         super().__init__("Camera")
@@ -36,6 +41,12 @@ class CameraPanel(QGroupBox):
         for w in (self._temp, self._status, self._cooler, self._stable,
                   self._cooled):
             layout.addWidget(w)
+
+        # Cooldown / warm-up progress (driven by the status poll).
+        self._cool_progress = QProgressBar()
+        self._cool_progress.setRange(0, 100)
+        self._cool_progress.setFormat("idle")
+        layout.addWidget(self._cool_progress)
 
         grid = QGridLayout()
         self._setpoint = QDoubleSpinBox()
@@ -56,10 +67,74 @@ class CameraPanel(QGroupBox):
         grid.addWidget(self._exposure, 2, 0, 1, 2)
         layout.addLayout(grid)
 
+        # --- acquisition configuration (populated from camera caps) ----
+        cfg = QGridLayout()
+        cfg.addWidget(QLabel("Trigger"), 0, 0)
+        self._trigger = QComboBox()
+        cfg.addWidget(self._trigger, 0, 1)
+        cfg.addWidget(QLabel("Int. shutter"), 1, 0)
+        self._shutter = QComboBox()
+        cfg.addWidget(self._shutter, 1, 1)
+        cfg.addWidget(QLabel("A-D rate"), 2, 0)
+        self._readout = QComboBox()
+        cfg.addWidget(self._readout, 2, 1)
+        cfg.addWidget(QLabel("Pre-amp gain"), 3, 0)
+        self._preamp = QComboBox()
+        cfg.addWidget(self._preamp, 3, 1)
+        cfg.addWidget(QLabel("EM gain"), 4, 0)
+        self._em_gain = QSpinBox()
+        self._em_btn = QPushButton("Set")
+        cfg.addWidget(self._em_gain, 4, 1)
+        cfg.addWidget(self._em_btn, 4, 2)
+        layout.addLayout(cfg)
+
         self._cool_btn.clicked.connect(
             lambda: self.cooldown_requested.emit(self._setpoint.value()))
         self._warm_btn.clicked.connect(self.warmup_requested.emit)
         self._exposure.valueChanged.connect(self.exposure_changed.emit)
+        self._trigger.currentTextChanged.connect(self.trigger_changed.emit)
+        self._shutter.currentTextChanged.connect(self.internal_shutter_changed.emit)
+        self._readout.currentIndexChanged.connect(self.readout_changed.emit)
+        self._preamp.currentIndexChanged.connect(self.preamp_changed.emit)
+        self._em_btn.clicked.connect(
+            lambda: self.em_gain_changed.emit(self._em_gain.value()))
+
+    def set_capabilities(self, caps: dict) -> None:
+        """Populate the config dropdowns from the (open) camera's reported
+        options. Called once at start-up; signals are blocked during the
+        programmatic fill so no spurious change is emitted."""
+        def fill_combo(combo, items, current_index=None, current_text=None):
+            combo.blockSignals(True)
+            combo.clear()
+            for it in items:
+                combo.addItem(it)
+            if current_index is not None and 0 <= current_index < len(items):
+                combo.setCurrentIndex(current_index)
+            elif current_text is not None:
+                combo.setCurrentText(current_text)
+            combo.setEnabled(bool(items))
+            combo.blockSignals(False)
+
+        fill_combo(self._trigger, caps.get("trigger_modes", []),
+                   current_text=caps.get("trigger_mode"))
+        fill_combo(self._shutter, caps.get("internal_shutter_modes", []),
+                   current_text=caps.get("internal_shutter"))
+        fill_combo(self._readout, caps.get("readout_rates", []),
+                   current_index=caps.get("readout_rate", 0))
+        fill_combo(self._preamp, caps.get("preamp_gains", []),
+                   current_index=caps.get("preamp_gain", 0))
+
+        em_range = caps.get("em_gain_range")
+        supported = em_range is not None
+        self._em_gain.setEnabled(supported)
+        self._em_btn.setEnabled(supported)
+        if supported:
+            lo, hi = em_range
+            self._em_gain.setRange(int(lo), int(hi))
+            if caps.get("em_gain") is not None:
+                self._em_gain.blockSignals(True)
+                self._em_gain.setValue(int(caps["em_gain"]))
+                self._em_gain.blockSignals(False)
 
     def apply_settings(self, setpoint_c: float, exposure_s: float) -> None:
         self._setpoint.setValue(setpoint_c)
@@ -79,6 +154,19 @@ class CameraPanel(QGroupBox):
         # Informational only -- "warn" (amber) when not cooled, since you can
         # still acquire, just with higher shot noise.
         self._cooled.set_state("ok" if s.get("cooled") else "warn")
+        self._update_progress(s)
+
+    def _update_progress(self, s: dict) -> None:
+        frac = s.get("cool_progress", 0.0)
+        self._cool_progress.setValue(int(round(100 * frac)))
+        if s.get("warming"):
+            self._cool_progress.setFormat("warming up… %p%")
+        elif s.get("stable") and s.get("cooler_on"):
+            self._cool_progress.setFormat("stable")
+        elif s.get("cooler_on"):
+            self._cool_progress.setFormat("cooling… %p%")
+        else:
+            self._cool_progress.setFormat("cooler off")
 
 
 class VacuumPanel(QGroupBox):
@@ -105,8 +193,10 @@ class GratingPanel(QGroupBox):
         layout = QVBoxLayout(self)
         self._position = LabeledValue("Position (steps)")
         self._status = LabeledValue("Status")
+        self._homed = StatusLamp("Homed")
         layout.addWidget(self._position)
         layout.addWidget(self._status)
+        layout.addWidget(self._homed)
 
         grid = QGridLayout()
         self._wavelength = QDoubleSpinBox()
@@ -130,6 +220,10 @@ class GratingPanel(QGroupBox):
     def update(self, s: dict) -> None:
         self._position.set_value(f"{s['position']:,d}")
         self._status.set_value(s["grating"])
+        # Amber (warn) when not homed: moves are refused, but it isn't an error.
+        self._homed.set_state("ok" if s.get("homed") else "warn")
+        # Go-to-λ needs a homed reference; Home/Stop stay available.
+        self._goto_btn.setEnabled(bool(s.get("homed")))
 
 
 class ShutterLaserPanel(QGroupBox):

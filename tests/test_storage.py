@@ -103,6 +103,7 @@ def test_record_single_scan_writes_csv(qapp, tmp_path):
     sys.open_all()
     try:
         w = _worker(sys)
+        sys.grating.home()                 # scans need a homed reference
         opts = SaveOptions(folder=str(tmp_path), filename="run", fmt="auto",
                            record_type="scans", stop_mode="count", stop_count=1,
                            wl_min=350.0, wl_max=450.0)
@@ -135,6 +136,7 @@ def test_record_scan_with_shots_image_and_spectrum(qapp, tmp_path):
     sys.open_all()
     try:
         w = _worker(sys)
+        sys.grating.home()                 # scans need a homed reference
         opts = SaveOptions(folder=str(tmp_path), filename="shots", fmt="hdf5",
                            record_type="scans", stop_mode="count", stop_count=1,
                            wl_min=350.0, wl_max=420.0, save_image_2d=True,
@@ -157,6 +159,7 @@ def test_record_scan_series_writes_hdf5(qapp, tmp_path):
     sys.open_all()
     try:
         w = _worker(sys)
+        sys.grating.home()                 # scans need a homed reference
         opts = SaveOptions(folder=str(tmp_path), filename="series", fmt="auto",
                            record_type="scans", stop_mode="count", stop_count=3,
                            wl_min=350.0, wl_max=450.0)

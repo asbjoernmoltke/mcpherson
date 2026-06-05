@@ -25,11 +25,18 @@ vacuum all have real drivers; **shutter** is still dummy-only). See
 
 ## Controller / lifecycle hardening (code-only)
 
-- [ ] **5. Grating controller** — track a "homed" state, refuse absolute moves
-  until homed, enforce calibrated position limits, validated go-to-wavelength.
-- [ ] **6. Camera lifecycle in GUI** — cooldown → wait-until-stable with
-  progress; sequenced warm-up/shutdown; expose gain / A-D rate / preamp /
-  trigger / internal-shutter (only exposure is exposed now).
+- [x] **5. Grating controller** — tracks a "homed" state (`is_homed`); refuses
+  absolute moves (and wavelength moves / scans) until homed; validates targets
+  against the calibration's position limits (`OutOfRangeError`) and the
+  reachable wavelength range; `stop()` invalidates the homed reference. GUI
+  shows a "Homed" lamp and disables Go-to-λ until homed.
+- [x] **6. Camera lifecycle in GUI** — cooldown progress bar (poll-driven,
+  non-blocking) + non-blocking warm-up state machine driven from the status
+  poll (no GUI freeze); `begin_warmup`/`is_warm_enough`/`finish_shutdown`
+  split with a blocking `safe_shutdown` kept for teardown. Config controls
+  exposed: trigger, internal-shutter, A-D readout rate, pre-amp gain, EM gain
+  (greyed when unsupported), populated from the camera's reported caps.
+  *Bench-verify the real Andor amp-mode index mapping (`set_amp_mode`).*
 
 ## Hardware bring-up (drivers exist; none verified on hardware)
 

@@ -129,6 +129,55 @@ class CameraDriver(Driver):
     def stop_acquisition(self) -> None:
         ...
 
+    # --- optional config enumeration (overridden where supported) -------
+    # Concrete defaults report "no choices / unsupported" so simple cameras
+    # and the offline path need not implement them; the GUI greys-out a
+    # control whose option list is empty / range is None. Mirrors the
+    # optional-capability pattern on LaserDriver.
+    def get_trigger_modes(self) -> list[str]:
+        """Selectable trigger modes (first = default)."""
+        return ["int"]
+
+    def get_trigger_mode(self) -> str:
+        return "int"
+
+    def get_internal_shutter_modes(self) -> list[str]:
+        """Selectable internal-shutter modes."""
+        return ["auto", "open", "closed"]
+
+    def get_internal_shutter(self) -> str:
+        return "auto"
+
+    def get_readout_rates(self) -> list[str]:
+        """A-D / horizontal readout-rate labels, fastest first. Empty if N/A."""
+        return []
+
+    def set_readout_rate(self, index: int) -> None:
+        raise NotImplementedError("Readout-rate selection not supported.")
+
+    def get_readout_rate(self) -> int:
+        return 0
+
+    def get_preamp_gains(self) -> list[str]:
+        """Pre-amplifier gain labels. Empty if N/A."""
+        return []
+
+    def set_preamp_gain(self, index: int) -> None:
+        raise NotImplementedError("Pre-amp gain selection not supported.")
+
+    def get_preamp_gain(self) -> int:
+        return 0
+
+    def get_em_gain_range(self) -> Optional[tuple[int, int]]:
+        """(min, max) EMCCD gain, or None on a conventional (non-EM) sensor."""
+        return None
+
+    def set_em_gain(self, value: int) -> None:
+        raise NotImplementedError("EM gain not supported by this sensor.")
+
+    def get_em_gain(self) -> Optional[int]:
+        return None
+
 
 class GratingDriver(Driver):
     """Grating scan controller (e.g. McPherson 789A-4).

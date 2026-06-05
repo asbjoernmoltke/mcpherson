@@ -34,6 +34,10 @@ MIN_SETPOINT_C = -100.0
 MAX_SETPOINT_C = -20.0
 DEFAULT_SETPOINT_C = -80.0
 
+# Reference ambient for the cooldown-progress estimate (the sensor starts near
+# room temperature). Only used to render a progress fraction; not a control.
+AMBIENT_REF_C = 21.0
+
 
 class CameraController(Controller):
     def __init__(self, driver: CameraDriver, *,
@@ -90,41 +94,103 @@ class CameraController(Controller):
                  % timeout)
         return False
 
+    def cooldown_progress(self) -> float:
+        """0..1 estimate of cooldown completion toward the setpoint.
+
+        Returns 1.0 once stable, 0.0 if the cooler is off. The estimate is
+        referenced to a nominal ambient (the start of a cooldown), so it is
+        only meaningful while cooling -- it drives a progress bar, nothing
+        safety-critical."""
+        if not self.driver.is_cooler_on():
+            return 0.0
+        if self.driver.is_temperature_stable():
+            return 1.0
+        setpoint = self.driver.get_temperature_setpoint()
+        temp = self.driver.get_temperature()
+        span = AMBIENT_REF_C - setpoint
+        if abs(span) < 1e-6:
+            return 1.0
+        frac = (AMBIENT_REF_C - temp) / span
+        return float(max(0.0, min(1.0, frac)))
+
+    # --- warm-up / shutdown -------------------------------------------
+    # The warm-up is split into begin/poll/finish phases so the GUI can drive
+    # it from the (non-blocking) status poll without freezing the worker
+    # thread. ``safe_shutdown`` keeps a blocking convenience for scripts and
+    # the app-teardown path.
+    def begin_warmup(self) -> None:
+        """Raise the setpoint to ``warm_target_c`` so the sensor warms while
+        the cooler still runs (controlled, not a sudden cooler-off shock)."""
+        log.info("CameraController: warm-up to %.1f C (cooler stays on)."
+                 % self.warm_target_c)
+        self.driver.set_temperature(self.warm_target_c)
+        self._notify(self.status)
+
+    def is_warm_enough(self) -> bool:
+        return self.driver.get_temperature() >= self.warm_target_c - 1.0
+
+    def finish_shutdown(self) -> None:
+        """Disable the cooler once warm. Safe to call repeatedly."""
+        self.driver.set_cooler(False)
+        log.info("CameraController: cooler off at %.1f C."
+                 % self.driver.get_temperature())
+        self._notify(self.status)
+
     def safe_shutdown(self) -> None:
-        """Controlled warm-up to ``warm_target_c`` before the cooler is
-        turned off. Always attempt to disable the cooler at the end."""
+        """Blocking controlled warm-up then cooler-off (scripts / teardown)."""
         log.info("CameraController: safe shutdown -- warming to %.1f C first."
                  % self.warm_target_c)
         try:
-            # Raise the setpoint so the sensor warms while the cooler still
-            # runs (controlled, not a sudden cooler-off thermal shock).
-            self.driver.set_temperature(self.warm_target_c)
+            self.begin_warmup()
             deadline = time.monotonic() + self.stable_timeout_s
             while time.monotonic() < deadline:
-                temp = self.driver.get_temperature()
                 self._notify(self.status)
-                if temp >= self.warm_target_c - 1.0:
+                if self.is_warm_enough():
                     break
                 time.sleep(0.5)
             else:
                 log.warn("CameraController: warm-up timed out; disabling "
                          "cooler anyway at %.1f C." % self.driver.get_temperature())
         finally:
-            self.driver.set_cooler(False)
-            log.info("CameraController: cooler off at %.1f C."
-                     % self.driver.get_temperature())
-            self._notify(self.status)
+            self.finish_shutdown()
 
     # --- acquisition config -------------------------------------------
     def configure(self, *, exposure_s: Optional[float] = None,
                   trigger_mode: Optional[str] = None,
-                  internal_shutter: Optional[str] = None) -> None:
+                  internal_shutter: Optional[str] = None,
+                  readout_index: Optional[int] = None,
+                  preamp_index: Optional[int] = None,
+                  em_gain: Optional[int] = None) -> None:
         if exposure_s is not None:
             self.driver.set_exposure(exposure_s)
         if trigger_mode is not None:
             self.driver.set_trigger_mode(trigger_mode)
         if internal_shutter is not None:
             self.driver.set_internal_shutter(internal_shutter)
+        if readout_index is not None:
+            self.driver.set_readout_rate(readout_index)
+        if preamp_index is not None:
+            self.driver.set_preamp_gain(preamp_index)
+        if em_gain is not None:
+            self.driver.set_em_gain(em_gain)
+
+    # --- capability discovery (read by the GUI to build its controls) --
+    def capabilities(self) -> dict:
+        """Static-ish option lists for the config controls. Queried once the
+        camera is open so dropdowns reflect the real device."""
+        d = self.driver
+        return {
+            "trigger_modes": d.get_trigger_modes(),
+            "trigger_mode": d.get_trigger_mode(),
+            "internal_shutter_modes": d.get_internal_shutter_modes(),
+            "internal_shutter": d.get_internal_shutter(),
+            "readout_rates": d.get_readout_rates(),
+            "readout_rate": d.get_readout_rate(),
+            "preamp_gains": d.get_preamp_gains(),
+            "preamp_gain": d.get_preamp_gain(),
+            "em_gain_range": d.get_em_gain_range(),
+            "em_gain": d.get_em_gain(),
+        }
 
     @property
     def is_cooled(self) -> bool:

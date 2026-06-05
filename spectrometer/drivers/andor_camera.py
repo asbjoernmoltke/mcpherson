@@ -124,6 +124,99 @@ class AndorCamera(CameraDriver):
         w, h = self._require().get_detector_size()
         return int(w), int(h)
 
+    # --- config enumeration --------------------------------------------
+    # Best-effort mappings onto pylablib's AndorSDK2Camera API. The Andor amp
+    # mode is a (channel, oamp, hsspeed, preamp) tuple; we expose the A-D
+    # readout rate (hsspeed) and pre-amp gain as independent dropdowns and set
+    # them via ``set_amp_mode`` (leaving the other axes at their current/default
+    # value). VERIFY ON BENCH: index<->mode mapping and available combinations.
+    def _amp_modes(self):
+        try:
+            return list(self._require().get_all_amp_modes())
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            log.warn("AndorCamera: get_all_amp_modes failed: %s" % exc)
+            return []
+
+    def get_trigger_modes(self) -> list[str]:
+        try:
+            return list(self._require().get_supported_trigger_modes())
+        except Exception:  # pragma: no cover - hardware dependent
+            return ["int", "ext", "ext_start", "ext_exposure"]
+
+    def get_trigger_mode(self) -> str:
+        try:
+            return str(self._require().get_trigger_mode())
+        except Exception:  # pragma: no cover
+            return "int"
+
+    def get_internal_shutter(self) -> str:
+        try:
+            return str(self._require().get_shutter())
+        except Exception:  # pragma: no cover
+            return "auto"
+
+    def get_readout_rates(self) -> list[str]:
+        seen, labels = {}, []
+        for m in self._amp_modes():
+            hz = getattr(m, "hsspeed", None)
+            if hz is not None and hz not in seen:
+                seen[hz] = True
+                mhz = getattr(m, "hsspeed_MHz", None)
+                labels.append("%.2f MHz" % mhz if mhz else "rate %d" % hz)
+        return labels
+
+    def set_readout_rate(self, index: int) -> None:
+        try:
+            self._require().set_amp_mode(hsspeed=index)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            log.warn("AndorCamera: set readout rate failed: %s" % exc)
+
+    def get_readout_rate(self) -> int:
+        try:
+            return int(self._require().get_amp_mode().hsspeed)
+        except Exception:  # pragma: no cover
+            return 0
+
+    def get_preamp_gains(self) -> list[str]:
+        seen, labels = {}, []
+        for m in self._amp_modes():
+            pa = getattr(m, "preamp", None)
+            if pa is not None and pa not in seen:
+                seen[pa] = True
+                gain = getattr(m, "preamp_gain", None)
+                labels.append("%.1fx" % gain if gain else "preamp %d" % pa)
+        return labels
+
+    def set_preamp_gain(self, index: int) -> None:
+        try:
+            self._require().set_amp_mode(preamp=index)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            log.warn("AndorCamera: set preamp gain failed: %s" % exc)
+
+    def get_preamp_gain(self) -> int:
+        try:
+            return int(self._require().get_amp_mode().preamp)
+        except Exception:  # pragma: no cover
+            return 0
+
+    def get_em_gain_range(self) -> Optional[tuple[int, int]]:
+        # Only EMCCD Newtons expose EM gain; DO920P is conventional. Probe and
+        # return None if unsupported.
+        try:
+            lo, hi = self._require().get_EMCCD_gain_range()
+            return int(lo), int(hi)
+        except Exception:  # pragma: no cover - conventional CCD / unsupported
+            return None
+
+    def set_em_gain(self, value: int) -> None:
+        self._require().set_EMCCD_gain(int(value))
+
+    def get_em_gain(self) -> Optional[int]:
+        try:
+            return int(self._require().get_EMCCD_gain()[0])
+        except Exception:  # pragma: no cover
+            return None
+
     # --- acquisition ---------------------------------------------------
     def grab(self, n_frames: int = 1, timeout: float = 5.0) -> np.ndarray:
         frames = self._require().grab(n_frames, frame_timeout=timeout)
@@ -165,6 +258,14 @@ class DummyCamera(CameraDriver):
         self._exposure = 0.1
         self._trigger = "int"
         self._internal_shutter = "auto"
+        # Config enumerations mirror what a Newton DO920P (conventional CCD)
+        # exposes: several A-D readout rates and pre-amp gains, no EM gain.
+        self._trigger_modes = ["int", "ext", "ext_start", "ext_exposure"]
+        self._shutter_modes = ["auto", "open", "closed"]
+        self._readout_rates = ["3.0 MHz", "1.0 MHz", "0.05 MHz"]
+        self._readout_index = 0
+        self._preamp_gains = ["1.0x", "2.0x", "4.0x"]
+        self._preamp_index = 0
         self._acquiring = False
         self._rng = np.random.default_rng(0)
         # fixed synthetic peak positions (pixels) and amplitudes
@@ -248,6 +349,39 @@ class DummyCamera(CameraDriver):
 
     def get_detector_size(self) -> tuple[int, int]:
         return self._w, self._h
+
+    # --- config enumeration (offline-complete) ------------------------
+    def get_trigger_modes(self) -> list[str]:
+        return list(self._trigger_modes)
+
+    def get_trigger_mode(self) -> str:
+        return self._trigger
+
+    def get_internal_shutter_modes(self) -> list[str]:
+        return list(self._shutter_modes)
+
+    def get_internal_shutter(self) -> str:
+        return self._internal_shutter
+
+    def get_readout_rates(self) -> list[str]:
+        return list(self._readout_rates)
+
+    def set_readout_rate(self, index: int) -> None:
+        self._readout_index = int(np.clip(index, 0, len(self._readout_rates) - 1))
+
+    def get_readout_rate(self) -> int:
+        return self._readout_index
+
+    def get_preamp_gains(self) -> list[str]:
+        return list(self._preamp_gains)
+
+    def set_preamp_gain(self, index: int) -> None:
+        self._preamp_index = int(np.clip(index, 0, len(self._preamp_gains) - 1))
+
+    def get_preamp_gain(self) -> int:
+        return self._preamp_index
+
+    # DO920P is a conventional CCD -> no EM gain (base default None applies).
 
     # --- frame synthesis ----------------------------------------------
     def _synth_frame(self) -> np.ndarray:

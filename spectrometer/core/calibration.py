@@ -53,6 +53,17 @@ class LinearCalibration:
         axis = self.wavelength_axis(position)
         return float(axis.min()), float(axis.max())
 
+    def wavelength_limits(self) -> tuple[float, float]:
+        """(min, max) centre wavelength reachable within ``position_limits``.
+
+        ``center_wavelength`` is monotonic in position, so the limits are the
+        centre wavelengths at the two ends (ordered, since ``nm_per_step`` may
+        be negative)."""
+        lo, hi = self.position_limits
+        a = self.center_wavelength(lo)
+        b = self.center_wavelength(hi)
+        return (min(a, b), max(a, b))
+
     # --- inverse map ---------------------------------------------------
     def wavelength_to_position(self, wavelength_nm: float) -> int:
         if self.nm_per_step == 0:

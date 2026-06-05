@@ -84,6 +84,7 @@ def test_dummy_scan_runs_uncooled_and_covers_range():
         assert not sys.camera.is_cooled       # camera is warm
         assert sys.safety.can_acquire         # ...but acquisition is allowed
 
+        sys.grating.home()                    # scans require a homed reference
         progress = []
         sys.engine.on_progress = lambda i, n: progress.append((i, n))
         sys.engine.n_frames = 1
