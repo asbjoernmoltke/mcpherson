@@ -3,25 +3,29 @@ from __future__ import annotations
 
 import sys
 
-from .core.system import build_system
+from .core.settings import Settings
+from .core.system import build_system_from_settings
 from .utilities import log
 
 
-def run_gui(dummy: bool = False, *, grating_port: str = "COM5") -> int:
+def run_gui(dummy: bool = False) -> int:
     from PyQt6.QtWidgets import QApplication
 
     from .gui.main_window import MainWindow
 
-    system = build_system(dummy=dummy, grating_port=grating_port)
+    settings = Settings.load()
+    system = build_system_from_settings(settings, dummy=dummy)
     log.info("Opening devices (dummy=%s)..." % dummy)
     system.open_all()
 
     app = QApplication(sys.argv)
-    window = MainWindow(system)
+    window = MainWindow(system, settings)
     window.show()
     try:
         return app.exec()
     finally:
+        # Persist settings (the window updates them from the live UI on close).
+        settings.save()
         # Always attempt a safe shutdown: warm the camera before the cooler
         # is cut, then release all devices.
         log.info("Shutting down: safe camera warm-up then close devices.")

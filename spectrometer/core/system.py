@@ -45,8 +45,14 @@ class System:
 
 def build_system(dummy: bool = False, *, grating_port: str = "COM5",
                  cooling_threshold: float | None = None,
-                 grating_name: str = "1200g/mm") -> System:
-    devices = build_devices(dummy=dummy, grating_port=grating_port)
+                 grating_name: str = "1200g/mm",
+                 laser_port: str | None = None, laser_interface: str = "cli",
+                 vacuum_port: str = "COM7", vacuum_gauge: int = 1,
+                 vacuum_units: str = "mbar") -> System:
+    devices = build_devices(dummy=dummy, grating_port=grating_port,
+                            laser_port=laser_port, laser_interface=laser_interface,
+                            vacuum_port=vacuum_port, vacuum_gauge=vacuum_gauge,
+                            vacuum_units=vacuum_units)
     abort = threading.Event()
 
     vacuum = VacuumController(
@@ -74,3 +80,13 @@ def build_system(dummy: bool = False, *, grating_port: str = "COM5",
     return System(devices=devices, abort=abort, camera=camera, grating=grating,
                   shutter=shutter, laser=laser, vacuum=vacuum, safety=safety,
                   sync=sync, calibration=calibration, engine=engine)
+
+
+def build_system_from_settings(settings, dummy: bool = False) -> System:
+    """Build the system using a :class:`~spectrometer.core.settings.Settings`."""
+    return build_system(
+        dummy=dummy, grating_port=settings.grating_port,
+        cooling_threshold=settings.cooling_threshold,
+        grating_name=settings.grating_name, laser_port=settings.laser_port,
+        laser_interface=settings.laser_interface, vacuum_port=settings.vacuum_port,
+        vacuum_gauge=settings.vacuum_gauge, vacuum_units=settings.vacuum_units)

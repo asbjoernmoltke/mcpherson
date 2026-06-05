@@ -36,9 +36,11 @@ class MainWindow(QMainWindow):
     _record = pyqtSignal(object)
     _start_polling = pyqtSignal()
 
-    def __init__(self, system: System):
+    def __init__(self, system: System, settings=None):
         super().__init__()
         self.system = system
+        from ..core.settings import Settings
+        self.settings = settings if settings is not None else Settings()
         self.setWindowTitle("McPherson Spectrometer")
         self.resize(1500, 950)
 
@@ -63,7 +65,21 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
         self._connect()
+        self._apply_settings()
         self._start_polling.emit()  # queued -> starts the worker's status timer
+
+    # --- settings <-> UI ----------------------------------------------
+    def _apply_settings(self) -> None:
+        s = self.settings
+        self.camera_panel.apply_settings(s.cooling_setpoint_c, s.exposure_s)
+        self.acq_panel.apply_settings(s.scan_wl_min, s.scan_wl_max, s.n_frames)
+
+    def _collect_settings(self) -> None:
+        s = self.settings
+        s.cooling_setpoint_c = self.camera_panel.setpoint_value()
+        s.exposure_s = self.camera_panel.exposure_value()
+        s.scan_wl_min, s.scan_wl_max = self.acq_panel.wl_range
+        s.n_frames = self.acq_panel.n_frames
 
     # --- layout --------------------------------------------------------
     def _build_layout(self) -> None:
@@ -157,10 +173,13 @@ class MainWindow(QMainWindow):
     def _on_record(self) -> None:
         from .save_dialog import SaveDialog
         wl_min, wl_max = self.acq_panel.wl_range
-        dialog = SaveDialog(self, wl_min=wl_min, wl_max=wl_max)
+        dialog = SaveDialog(self, wl_min=wl_min, wl_max=wl_max,
+                            settings=self.settings)
         if dialog.exec():
+            opts = dialog.options()
+            self.settings.update_from_save_options(opts)  # remember choices
             self.system.engine.n_frames = self.acq_panel.n_frames
-            self._record.emit(dialog.options())
+            self._record.emit(opts)
 
     def _on_record_finished(self, path: str) -> None:
         QMessageBox.information(self, "Recording complete", "Saved to:\n%s" % path)
@@ -185,6 +204,7 @@ class MainWindow(QMainWindow):
 
     # --- shutdown ------------------------------------------------------
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt signature)
+        self._collect_settings()   # capture UI values; app.run_gui saves them
         self.system.abort.set()
         # Stop the status timer inside the worker thread first, so Qt never
         # tries to kill a timer from another thread on teardown.

@@ -25,16 +25,19 @@ def _seconds(edit: QTimeEdit) -> float:
 
 class SaveDialog(QDialog):
     def __init__(self, parent=None, *, wl_min: float = 350.0,
-                 wl_max: float = 500.0, default_folder: str | None = None):
+                 wl_max: float = 500.0, default_folder: str | None = None,
+                 settings=None):
         super().__init__(parent)
         self.setWindowTitle("Save / Record")
         self.setMinimumWidth(440)
         layout = QVBoxLayout(self)
 
+        folder0 = (settings.save_folder if settings else default_folder
+                   or os.path.join(os.path.expanduser("~"), "Documents"))
+
         # --- destination ------------------------------------------------
         dest = QFormLayout()
-        self._folder = QLineEdit(default_folder
-                                 or os.path.join(os.path.expanduser("~"), "Documents"))
+        self._folder = QLineEdit(folder0)
         browse = QPushButton("Browse…")
         browse.clicked.connect(self._browse)
         folder_row = QHBoxLayout()
@@ -44,11 +47,14 @@ class SaveDialog(QDialog):
         folder_w.setLayout(folder_row)
         dest.addRow("Folder:", folder_w)
 
-        self._filename = QLineEdit("spectrum")
+        self._filename = QLineEdit(settings.save_filename if settings else "spectrum")
         dest.addRow("File name:", self._filename)
 
         self._format = QComboBox()
         self._format.addItems(["auto (CSV single / HDF5 series)", "csv", "hdf5"])
+        if settings:
+            self._format.setCurrentIndex(
+                {"auto": 0, "csv": 1, "hdf5": 2}.get(settings.save_format, 0))
         dest.addRow("Format:", self._format)
         layout.addLayout(dest)
 
@@ -58,10 +64,13 @@ class SaveDialog(QDialog):
         self._save_image = QCheckBox("Raw 2-D image per shot (forces HDF5)")
         self._save_spectrum = QCheckBox("Raw 1-D spectrum per shot")
         self._save_stitched = QCheckBox("Stitched 1-D spectrum per scan")
-        self._save_stitched.setChecked(True)
+        self._save_image.setChecked(settings.save_image_2d if settings else False)
+        self._save_spectrum.setChecked(settings.save_spectrum_1d if settings else False)
+        self._save_stitched.setChecked(settings.save_stitched if settings else True)
         for w in (self._save_image, self._save_spectrum, self._save_stitched):
             cl.addWidget(w)
         self._save_image.toggled.connect(self._sync_format_constraint)
+        self._sync_format_constraint()   # honour a prefilled 2-D selection
         layout.addWidget(content_box)
 
         # --- operation mode --------------------------------------------

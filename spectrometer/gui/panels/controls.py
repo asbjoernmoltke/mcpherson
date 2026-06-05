@@ -61,6 +61,16 @@ class CameraPanel(QGroupBox):
         self._warm_btn.clicked.connect(self.warmup_requested.emit)
         self._exposure.valueChanged.connect(self.exposure_changed.emit)
 
+    def apply_settings(self, setpoint_c: float, exposure_s: float) -> None:
+        self._setpoint.setValue(setpoint_c)
+        self._exposure.setValue(exposure_s)
+
+    def setpoint_value(self) -> float:
+        return self._setpoint.value()
+
+    def exposure_value(self) -> float:
+        return self._exposure.value()
+
     def update(self, s: dict) -> None:
         self._temp.set_value(f"{s['temperature']:.1f} °C")
         self._status.set_value(s["camera"])
@@ -295,6 +305,11 @@ class AcquisitionPanel(QGroupBox):
     @property
     def n_frames(self) -> int:
         return self._frames.value()
+
+    def apply_settings(self, wl_min: float, wl_max: float, n_frames: int) -> None:
+        self._wl_min.setValue(wl_min)
+        self._wl_max.setValue(wl_max)
+        self._frames.setValue(n_frames)
 
     def set_progress(self, done: int, total: int) -> None:
         self._progress.setMaximum(total)
