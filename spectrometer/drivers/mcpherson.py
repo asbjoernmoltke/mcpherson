@@ -40,6 +40,33 @@ class MP_789A_4(GratingDriver):
     DEF_VEL = 60000
     MIN_VEL = 0
 
+    # ] limit-status reply is a decimal BIT-SUM. Parse it as an int and test
+    # bits -- substring checks ('2' in '32') misfire. Confirmed on hw 2026-06-08:
+    # the home bit only appears after `A8`; home is the '-' direction.
+    ST_MOVING = 2
+    ST_HOME = 32
+    ST_UPPER = 64
+    ST_LOWER = 128
+    HOME_SWEEP_TIMEOUT = 300.0   # s; bounded by the limit switches in any case
+
+    @staticmethod
+    def _parse_status(reply) -> int:
+        """First integer token in a controller reply (e.g. ``]   32 `` -> 32).
+        Robust to the ``]``/``^`` echo and trailing spaces/CRLF."""
+        if isinstance(reply, (bytes, bytearray)):
+            reply = reply.decode('utf-8', errors='replace')
+        digits = ''
+        for ch in reply:
+            if ch.isdigit():
+                digits += ch
+            elif digits:
+                break
+        return int(digits) if digits else 0
+
+    def _limit_status(self) -> int:
+        """Parsed ``]`` status (bit-sum: 2 moving, 32 home, 64/128 limits)."""
+        return self._parse_status(self.s.xfer([b']']))
+
     def backend(self)->str:
         return 'MP_789A_4'
 
@@ -107,8 +134,11 @@ class MP_789A_4(GratingDriver):
         if self.s is None:
             raise RuntimeError('self.s is None')
 
-        # Starting movement watchdog.
-        self.movement_status_tid = threading.Thread(target=self.movement_status_thread)
+        # Starting movement watchdog. Daemon + a stop event so the process can
+        # exit cleanly and close() can join it (the original looped forever).
+        self._watchdog_stop = threading.Event()
+        self.movement_status_tid = threading.Thread(
+            target=self.movement_status_thread, daemon=True)
         self.movement_status_tid.start()
 
         # Home the 789A-4.
@@ -120,7 +150,7 @@ class MP_789A_4(GratingDriver):
         # The middleware calls the external is_moving() function.
         # This way we can ensure that the device is only queried for movement status when it is safe to do so.
 
-        while True:
+        while not self._watchdog_stop.is_set():
             time.sleep(0.25)
 
             axis_moving = self._moving
@@ -149,204 +179,98 @@ class MP_789A_4(GratingDriver):
     def get_stage(self):
         return None
 
-    def home(self)->bool:
-        """ Homes the 789A-4.
+    def home(self) -> bool:
+        """Home the 789A-4 (integer ``]`` bit-parsing; validated on hw 2026-06-08).
+
+        Enables the home circuit (``A8`` -- REQUIRED before the home bit 32
+        appears in ``]``), brings the mechanism onto the home flag (home is the
+        ``-`` direction), runs the controller's high-accuracy Find-Home to pin
+        the edge, then resets the software position to 0.
+
+        Motion during homing is driven by direct ``]`` polling (not the
+        watchdog), so ``_moving`` is kept False and ``_homing`` True throughout.
 
         Raises:
-            RuntimeError: Raised if the device hits an edge limit-switch before a home switch; may not have a home switch.
-            RuntimeError: Raised if the device hits an edge limit-switch before a home switch; may not have a home switch.
-            RuntimeError: Raised when the device attempts to home from a location which it is unable to home from.
-
+            RuntimeError: on a limit switch (cannot find the flag) or timeout.
         Returns:
-            bool: Success (True) or failure (False).
+            bool: True on success.
         """
-
-        # Halt the device before beginning the homing process.
-        self.stop()
-
-        # Set the movement speed for homing.
+        self.stop()                          # halt + clear flags before homing
         self._enact_speed_factor(self._home_speed_mult)
-
-        # Set the `_is_homing` flag to disallow simultaneous homing attempts.
-        log.info('Beginning home.')
         self._homing = True
+        self._moving = False
+        log.info('Beginning home.')
+        try:
+            self.s.xfer([b'A8'])             # enable home circuit (REQUIRED)
+            status = self._limit_status()
+            log.info('Home: initial ] status = %d.' % status)
+            if status & (self.ST_UPPER | self.ST_LOWER):
+                raise RuntimeError(
+                    'On a limit switch (status=%d); move off it before homing.'
+                    % status)
 
-        # Enable the 789A-4's homing circuit.
-        # self.s.write(b'A8')
-        # time.sleep(MP_789A_4.WR_DLY)
-        # rx = self.s.read(128).decode('utf-8')
+            if status & self.ST_HOME:
+                # Already on the flag: back off (+) until clear, so the approach
+                # below always lands on the flag from the same (upper) side.
+                log.info('On the home flag; backing off (+) until clear.')
+                self._sweep_to_home_state(b'M+23000', want_on_flag=False)
 
-        rx = self.s.xfer([b'A8']).decode('utf-8')
-
-        # Check limit switch status.
-        # self.s.write(b']')
-        # time.sleep(MP_789A_4.WR_DLY)
-        # rx_raw = self.s.read(128)
-        rx_raw = self.s.xfer([b']'])
-        rx = rx_raw.decode('utf-8')
-
-        log.debug('RECEIVED (raw):', rx_raw)
-
-        # Carries out the 789A-4 homing algorithm as described in the relevant manual.
-        if (('32' in rx) or ('128' in rx)) and ('+' not in rx and '-' not in rx):
-            log.info('Home switch blocked.')
-
-            # Home switch blocked.
-            # Move at constant velocity (23 KHz).
-            # self.s.write(b'M+23000')
-            self.s.xfer([b'M+23000'])
-
-            # time.sleep(MP_789A_4.WR_DLY)
-            while True:
-                # Check limit status - send every 0.8 seconds.
-                # self.s.write(b']')
-                # time.sleep(MP_789A_4.WR_DLY)     
-                # rx = self.s.read(128).decode('utf-8')
-                rx = self.s.xfer([b']']).decode('utf-8')
-                if ('0' in rx or '2' in rx) and ('+' not in rx and '-' not in rx): # Not-on-a-limit-switch status is 0 when stationary, 2 when in motion.
-                    break
-                elif ('64' in rx or '128' in rx) and ('+' not in rx and '-' not in rx): # If we have hit either of the extreme limit switches and stopped.
-                    # Reset the movement speed.
-                    self._enact_speed_factor(self._move_speed_mult)
-                    log.error('Hit edge limit switch when homing. Does this device have a home sensor?')
-                    raise RuntimeError('Hit edge limit switch when homing. Does this device have a home sensor?')
-                time.sleep(MP_789A_4.WR_DLY * 7)
-            # Soft stop when homing flag is located.
-            # self.s.write(b'@')
-            self.s.xfer([b'@'])
-            time.sleep(2) 
-            # Back into home switch 2 motor revolutions.
-            self.s.xfer([b'-72000'])
-        # self.s.xfer([b'-108000'])
-            time.sleep(2) 
-            # Go 2 motor revolutions up.
-            # self.s.write(b'+72000')
-        # self.s.xfer([b'+72000'])
-            # time.sleep(3) 
-            # Enable 'high accuracy' circuit.
-            # self.s.write(b'A24')
-            self.s.xfer([b'A24'])
-            # time.sleep(1) 
-            # Find edge of home flag at 1000 steps/sec.
-            # self.s.write(b'F1000,0')
-            # sps = 1000 * MP_789A_4.HSM
-            # msg = f'F{str(sps)},0'
-            # self.s.xfer([msg.encode('utf-8')])
-            self.s.xfer([b'F1000,0'])
-            # time.sleep(5)
-
-            while True:
-                # Check limit status - send every 0.8 seconds.
-                rx = self.s.xfer([b']']).decode('utf-8')
-                if ('0' in rx or '32' in rx) and ('+' not in rx and '-' not in rx): # We're not moving one way or another.
-                    break
-                time.sleep(2)
-
-            # Disable home circuit.
-            # self.s.write(b'A0')
-            self.s.xfer([b'A0'])
-            time.sleep(MP_789A_4.WR_DLY) 
-            pass
-        elif ('0' in rx or '2' in rx or '64' in rx) and ('+' not in rx and '-' not in rx):
-            # NOTE: When not on a limit switch, the device reports 0 when stationary and 2 when in motion. It seems sometimes it may report 2 even when not moving. We should just try to home anyway.
-            if '2' in rx:
-                log.warn('Device is moving. Will attempt to home anyway.')
-            log.info('Home switch not blocked.')
-            # Home switch not blocked.
-            # Move at constant velocity (23 KHz).
-            # self.s.write(b'M-23000')
-            self.s.xfer([b'M-23000'])
-            time.sleep(MP_789A_4.WR_DLY)
-            while True:
-                # Check limit status - send every 0.8 seconds.
-                # self.s.write(b']')
-                # time.sleep(MP_789A_4.WR_DLY)     
-                # rx = self.s.read(128).decode('utf-8')
-                rx = self.s.xfer([b']']).decode('utf-8')
-                if ('32' in rx or '34' in rx) and ('+' not in rx and '-' not in rx): # Home-switch-blocked status is 32 when stationary, 34 when in motion.
-                    break
-                elif ('64' in rx or '128' in rx) and ('+' not in rx and '-' not in rx): # If we have hit either of the extreme limit switches and stopped.
-                    # TODO: Some 789s don't have a limit switch. In this case, we will need to home using the lower limit switch... ?
-                    # Reset the movement speed.
-                    self._enact_speed_factor(self._move_speed_mult)
-                    log.error('Hit edge limit switches twice when homing. Does this device have a home sensor?')
-                    raise RuntimeError('Hit edge limit switches twice when homing. Does this device have a home sensor?')
-                time.sleep(MP_789A_4.WR_DLY * 7)
-            # Soft stop when homing flag is located.
-            # self.s.write(b'@')
-            self.s.xfer([b'@'])
-            time.sleep(2) 
-            # Back into home switch 2 motor revolutions.
-            self.s.xfer([b'-72000'])
-            time.sleep(2)
-            # Back into home switch 3 motor revolutions.
-            # self.s.write(b'-108000')
-        # self.s.xfer([b'-108000'])
-            # time.sleep(1) 
-            # Go 2 motor revolutions up.
-            # self.s.write(b'+72000')
-        # self.s.xfer([b'+72000'])
-            # time.sleep(1) 
-            # Enable 'high accuracy' circuit.
-            # self.s.write(b'A24')
-            self.s.xfer([b'A24'])
-            # time.sleep(1) 
-            # Find edge of home flag at 1000 steps/sec.
-            # self.s.write(b'F1000,0')
-
-            # sps = 1000 * MP_789A_4.HSM
-            # msg = f'F{str(sps)},0'
-            # self.s.xfer([msg.encode('utf-8')])
-            self.s.xfer([b'F1000,0'])
-            # time.sleep(5) 
-
-            while True:
-                # Check limit status - send every 0.8 seconds.
-                rx = self.s.xfer([b']']).decode('utf-8')
-                if ('0' in rx or '32' in rx) and ('+' not in rx and '-' not in rx): # We're not moving one way or another.
-                    break
-                time.sleep(2)
-
-            # Disable home circuit.
-            # self.s.write(b'A0')
-            self.s.xfer([b'A0'])
-            time.sleep(MP_789A_4.WR_DLY) 
-            pass
-        else:
-            # Reset the movement speed.
+            # Approach the flag from above (home is the '-' direction). The
+            # sweep stops on the flag's leading edge -- this is the home
+            # reference. (The controller's F1000,0 high-accuracy Find-Home was
+            # tried on hw 2026-06-08 but drove OFF the flag and never converged
+            # -- its args/direction need the 789A-4 manual, so it is left out;
+            # the consistent down-approach edge is repeatable enough until lamp
+            # calibration. TODO: verified fine-edge homing.)
+            log.info('Sweeping - to the home flag.')
+            self._sweep_to_home_state(b'M-23000', want_on_flag=True)
+            self.s.xfer([b'A0'])             # disable home circuit
+            self._position = 0
+            log.info('Home complete (coarse, on flag); software position 0.')
+            return True
+        finally:
+            self._moving = False
+            self._homing = False
             self._enact_speed_factor(self._move_speed_mult)
-            log.error('Unknown position to home from.', rx)
-            raise RuntimeError('Unknown position to home from (%s).'%(rx))
 
-        self._moving = True # assume moving until we confirm not
+    # --- homing helpers (integer-status, limit-safe) -------------------
+    def _sweep_to_home_state(self, move_cmd: bytes, want_on_flag: bool) -> None:
+        """Constant-velocity sweep until the home bit matches ``want_on_flag``,
+        then soft-stop. Bounded by the limit switches and a timeout."""
+        self.s.xfer([move_cmd])
+        deadline = time.monotonic() + self.HOME_SWEEP_TIMEOUT
+        while True:
+            status = self._limit_status()
+            if status & (self.ST_UPPER | self.ST_LOWER):
+                self._soft_stop()
+                raise RuntimeError(
+                    'Hit a limit switch while homing (status=%d). Home flag '
+                    'not found in this direction.' % status)
+            if bool(status & self.ST_HOME) == want_on_flag:
+                self._soft_stop()
+                return
+            if time.monotonic() > deadline:
+                self._soft_stop()
+                raise RuntimeError('Home sweep timed out (status=%d).' % status)
+            time.sleep(MP_789A_4.WR_DLY * 3)
 
-        # The standard is for the device drivers to read 0 when homed if the controller does not itself provide a value.
-        # It is up to the middleware to handle zero- and home-offsets.
-        if (self._moving):
-            log.warn('Post-home movement detected. Entering movement remediation.')
-            # self.s.write(b'@')
-            self.s.xfer([b'@'])
-            time.sleep(MP_789A_4.WR_DLY * 10)
-        stop_waits = 0
-        
-        while(self._moving):
-            if stop_waits > 3:
-                stop_waits = 0
-                log.warn('Re-commanding that device ceases movement.')
-                # self.s.write(b'@')
-                self.s.xfer([b'@'])
-            stop_waits += 1
-            log.warn('Waiting for device to cease movement.')
-            time.sleep(MP_789A_4.WR_DLY * 10)
-
-        # Reset position and homing status.
-        self._position = 0
-        self._homing = False
-
-        # Reset the movement speed.
-        self._enact_speed_factor(self._move_speed_mult)
-
-        return True
+    def _wait_stopped(self, timeout: float = 30.0) -> None:
+        """Block until the controller reports stopped (``]`` moving bit clear),
+        raising on a limit switch. For finite moves / Find-Home."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = self._limit_status()
+            if status & (self.ST_UPPER | self.ST_LOWER):
+                self._soft_stop()
+                raise RuntimeError('Hit a limit switch (status=%d).' % status)
+            if not (status & self.ST_MOVING):
+                return
+            time.sleep(MP_789A_4.WR_DLY * 3)
+        # A timeout means motion did not complete as expected -- treat it as a
+        # failure, never a silent success.
+        self._soft_stop()
+        raise RuntimeError('Move did not stop within %.0fs (status=%d).'
+                           % (timeout, self._limit_status()))
 
     def get_position(self):
         """ Returns the current position of the 789A-4.
@@ -358,27 +282,18 @@ class MP_789A_4(GratingDriver):
         log.debug('func: get_position')
         return self._position
     
+    def _soft_stop(self):
+        """Triple-redundant ``@`` soft-stop WITHOUT touching the _moving /
+        _homing flags (used inside the homing sequence)."""
+        for _ in range(3):
+            self.s.xfer([b'@'])
+            log.info('Stopping.')
+            time.sleep(MP_789A_4.WR_DLY)
+
     def stop(self):
-        """ Triple-redundant serial stop command.
-        """
-
+        """ Triple-redundant serial stop command (E-stop path). """
         self.stop_queued = 1
-
-        self.s.xfer([b'@'])
-        # self.s.write(b'@')
-        log.info('Stopping.')
-        time.sleep(MP_789A_4.WR_DLY)
-
-        self.s.xfer([b'@'])
-        # self.s.write(b'@')
-        log.info('Stopping.')
-        time.sleep(MP_789A_4.WR_DLY)
-
-        self.s.xfer([b'@'])
-        # self.s.write(b'@')
-        log.info('Stopping.')
-        time.sleep(MP_789A_4.WR_DLY)
-
+        self._soft_stop()
         self._moving = False
         self._homing = False
 
@@ -435,16 +350,14 @@ class MP_789A_4(GratingDriver):
         self.moving_poll_mutex.acquire()
 
         log.debug('ACQUIRED MOVING POLL MUTEX')
-        status = self.s.xfer([b'^']).decode('utf-8').rstrip()
-        log.debug('789 _status:', status)
+        raw = self.s.xfer([b'^'])
+        log.debug('789 _status:', raw)
         time.sleep(MP_789A_4.WR_DLY)
 
-        if ('0' in status) and ('+' not in status and '-' not in status):
-            # self._moving = False
-            moving = False
-        else:
-            # self._moving = True
-            moving = True
+        # `^` reads moving status (0 = stopped, non-zero = in motion). Parse the
+        # integer rather than substring-matching '0' (which a value like 10/20
+        # would also contain).
+        moving = self._parse_status(raw) != 0
 
         self.moving_poll_mutex.release()
 
@@ -554,11 +467,13 @@ class MP_789A_4(GratingDriver):
         # self.s.write(b']')
         # time.sleep(MP_789A_4.WR_DLY)     
         # rx = self.s.read(128).decode('utf-8')
-        rx = self.s.xfer([b']']).decode('utf-8')
+        # Parse the limit status as an int + test bits (substring checks like
+        # '64' in rx miss combined states e.g. 66 = upper-limit + moving).
+        status = self._parse_status(self.s.xfer([b']']))
 
         if steps > 0:
             # Verify we are not at the upper limit.
-            if '64' in rx:
+            if status & self.ST_UPPER:
                 log.warn('Upper limit switch hit. Cannot move further in this direction.')
                 raise RuntimeError('Upper limit switch hit. Cannot move further in this direction.')
 
@@ -571,7 +486,7 @@ class MP_789A_4(GratingDriver):
             time.sleep(MP_789A_4.WR_DLY)
         elif steps < 0:
             # Verify we are not at the lower limit.
-            if '128' in rx:
+            if status & self.ST_LOWER:
                 log.warn('Lower limit switch hit. Cannot move further in this direction.')
                 raise RuntimeError('Lower limit switch hit. Cannot move further in this direction.')
 
@@ -653,6 +568,14 @@ class MP_789A_4(GratingDriver):
         pass
 
     def close(self):
+        # Stop the watchdog before closing the port so it doesn't poll a
+        # closed handle.
+        stop = getattr(self, "_watchdog_stop", None)
+        if stop is not None:
+            stop.set()
+        tid = getattr(self, "movement_status_tid", None)
+        if tid is not None and tid.is_alive():
+            tid.join(timeout=1.0)
         self.s.close()
 
     @property

@@ -40,10 +40,13 @@ vacuum all have real drivers; **shutter** is still dummy-only). See
 
 ## Hardware bring-up (drivers exist; none verified on hardware)
 
-- [ ] **7a.** Grating connection probe (`discover_mcpherson.py`).
-- [ ] **7b.** Bench-test: camera cooling lifecycle, grating homing, laser power
-  calibration + RUN state (`origami_power_test.py`), vacuum gauge read
-  (`discover_edwards.py`); confirm COM ports + active grating.
+- [x] **7a.** Grating connection probe (`discover_mcpherson.py`) — **done**:
+  COM5 confirmed (FTDI, fw v2.55), read-only identify + status.
+- [ ] **7b.** Bench-test: camera cooling lifecycle, **grating homing (◐ shipped
+  `home()` lands on the flag in ~12 s, verified 2026-06-08; the controller's
+  `F1000,0` fine-edge find is broken/removed pending the 789A-4 manual)**,
+  laser power calibration + RUN state (`origami_power_test.py`), vacuum gauge
+  read (`discover_edwards.py`); confirm COM ports + active grating.
 - [ ] **7c.** Lamp wavelength calibration (see #2).
 
 ## Shutter (excluded for now)

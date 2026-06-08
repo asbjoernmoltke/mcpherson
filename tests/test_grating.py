@@ -6,7 +6,27 @@ import pytest
 from spectrometer.controllers.grating import GratingController
 from spectrometer.core.calibration import default_calibration
 from spectrometer.core.exceptions import NotHomedError, OutOfRangeError
-from spectrometer.drivers.mcpherson import DummyGrating
+from spectrometer.drivers.mcpherson import MP_789A_4, DummyGrating
+
+
+# --- 789A-4 status parsing (the substring-bug regression guard) -------
+def test_parse_status_is_integer_not_substring():
+    p = MP_789A_4._parse_status
+    assert p(b"]   0 \r\n") == 0
+    assert p(b"]   32 \r\n") == 32
+    assert p(b"]   34 \r\n") == 34          # home + moving
+    assert p(b"^   2 \r\n") == 2
+    assert p(b"]   128 \r\n") == 128
+
+
+def test_status_bits_distinguish_home_from_moving():
+    # The old `'2' in rx` check misfired on a status of 32 (contains '2').
+    assert not (MP_789A_4.ST_HOME & MP_789A_4.ST_MOVING)
+    assert not (32 & MP_789A_4.ST_MOVING)       # on-flag is NOT "moving"
+    assert 34 & MP_789A_4.ST_MOVING             # home+moving IS moving
+    # The old `'64' in rx` check missed 66 (upper-limit + moving).
+    assert 66 & MP_789A_4.ST_UPPER
+    assert 130 & MP_789A_4.ST_LOWER             # 128 + moving
 
 
 def _controller():
