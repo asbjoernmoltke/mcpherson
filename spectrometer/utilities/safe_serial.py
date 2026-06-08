@@ -48,6 +48,7 @@ class _SafeSerial:
     def __init__(self, port: str, baudrate: int, timeout: float = ...):
         print('Creating SafeSerial on port:', port)
 
+        self._port = port
         retries = 0
         while True:
             try:
@@ -72,16 +73,24 @@ class _SafeSerial:
         log.debug('SafeSerial created on port:', port)
 
     def __del__(self):
-        log.info('SafeSerial destructor called.')
-        self._m.acquire()
-        log.info('Destroying SafeSerial.')
-        self._s.close()
+        # Best-effort close; NEVER block interpreter shutdown on the mutex
+        # (the old code re-acquired the lock close() already held -> deadlock,
+        # which hung the process and kept the COM port locked).
+        try:
+            s = getattr(self, '_s', None)
+            if s is not None and s.is_open:
+                s.close()
+        except Exception:
+            pass
 
     def close(self):
         log.info('SafeSerial close called.')
-        self._m.acquire()
-        log.info('Closing SafeSerial.')
-        self._s.close()
+        with self._m:                       # acquire AND release (was leaked)
+            if self._s.is_open:
+                self._s.close()
+        # Drop the cached singleton so a later open() re-creates it and __del__
+        # doesn't act on a stale, closed handle.
+        safe_ports.pop(getattr(self, '_port', None), None)
 
     # Mutex-protected.
     # TODO: Delete this.
