@@ -97,12 +97,16 @@ class HardwareWorker(QObject):
                 try:
                     s.vacuum.poll()
                     s.safety.check_vacuum_while_cold()
-                    snap.update(vacuum=s.vacuum.status, vacuum_ok=s.vacuum.vacuum_ok)
+                    snap.update(vacuum=s.vacuum.status, vacuum_ok=s.vacuum.vacuum_ok,
+                                vacuum_turbo=s.vacuum.turbo_state,
+                                vacuum_backing=s.vacuum.backing_state)
                 except Exception as exc:
                     log.error("Vacuum poll failed: %s" % exc)
-                    snap.update(vacuum="error", vacuum_ok=False)
+                    snap.update(vacuum="error", vacuum_ok=False,
+                                vacuum_turbo=None, vacuum_backing=None)
             else:
-                snap.update(vacuum="offline", vacuum_ok=False)
+                snap.update(vacuum="offline", vacuum_ok=False,
+                            vacuum_turbo=None, vacuum_backing=None)
 
             if conn["camera"]:
                 self._drive_warmup()        # non-blocking warm-up state machine

@@ -182,12 +182,18 @@ class VacuumPanel(QGroupBox):
         layout.addWidget(self.conn)
         self._pressure = LabeledValue("Pressure")
         self._ok = StatusLamp("Safe to cool")
-        layout.addWidget(self._pressure)
-        layout.addWidget(self._ok)
+        # Read-only pump status (display only -- the software never commands
+        # the pumps; they're run on isolated hardware).
+        self._turbo = LabeledValue("Turbo pump")
+        self._backing = LabeledValue("Backing pump")
+        for w in (self._pressure, self._ok, self._turbo, self._backing):
+            layout.addWidget(w)
 
     def update(self, s: dict) -> None:
         self._pressure.set_value(s["vacuum"])
         self._ok.set_state(_lamp_state(s["vacuum_ok"]))
+        self._turbo.set_value(s.get("vacuum_turbo") or "--")
+        self._backing.set_value(s.get("vacuum_backing") or "--")
 
 
 class GratingPanel(QGroupBox):

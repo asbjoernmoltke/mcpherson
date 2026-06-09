@@ -303,3 +303,12 @@ class VacuumDriver(Driver):
     @abstractmethod
     def units(self) -> str:
         ...
+
+    # --- optional read-only pump status (display only; never commands) ---
+    def read_turbo_state(self) -> Optional[str]:
+        """Turbo-pump status string for display, or None if unavailable."""
+        return None
+
+    def read_backing_state(self) -> Optional[str]:
+        """Backing-pump status string for display, or None if unavailable."""
+        return None

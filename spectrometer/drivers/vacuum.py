@@ -44,6 +44,14 @@ class DummyVacuum(VacuumDriver):
     def units(self) -> str:
         return self._units
 
+    # --- simulated read-only pump status (display only) ---------------
+    def read_turbo_state(self) -> str:
+        # Pretend the turbo is at full speed once the pressure is low.
+        return "Normal" if self._pressure < 1.0 else "Accelerating"
+
+    def read_backing_state(self) -> str:
+        return "Running"
+
     # --- test/simulation helper (not part of the ABC) -----------------
     def set_pressure(self, pressure: float) -> None:
         """Simulate a pressure change (e.g. pump-down) for offline tests."""

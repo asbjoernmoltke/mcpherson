@@ -71,7 +71,7 @@ gauge 1/2/3). Confirm the real format/slot/units with `tests/discover_edwards.py
 | ☐ | ⚠️ **Safe pressure threshold for cooling** | Camera mustn't cool above this | `1.0e-4` (arbitrary) | `build_system(cooling_threshold=...)` |
 | ☐ | 🔧 **TIC COM port** | Serial connection | `COM7` (guess) | `build_devices(vacuum_port=...)` |
 | ☐ | 🔧 **Value reply format** (`<p>;<unit>;<state>`?) | Correct parse | assumed `;`-separated, field0=pressure | `EdwardsTIC.parse_value_reply` |
-| ☐ | 📋 **Pump object IDs** (turbo/backing) | Optional status display | turbo=904, backing=910 (guess) | `EdwardsTIC(turbo_object=, backing_object=)` |
+| ◐ | 📋 **Pump object IDs** (turbo/backing) | Read-only status now shown in the Vacuum panel; CONFIRM the IDs so the values are real | turbo=904, backing=910 (guess) | `EdwardsTIC(turbo_object=, backing_object=)` |
 | ☐ | 📋 **Loss-of-vacuum response** | Warn-only alarm | `SafetyManager.check_vacuum_while_cold` | — |
 
 **Action:** run `python tests/discover_edwards.py [COM]` → identify the

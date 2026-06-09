@@ -112,6 +112,23 @@ def test_real_bundle_constructs_without_connecting():
     assert not b.vacuum.is_connected
 
 
+def test_vacuum_pump_status_in_snapshot(qapp):
+    sys = build_system(dummy=True)
+    sys.open_all()
+    try:
+        w = _worker(sys)
+        snaps = []
+        w.status_updated.connect(snaps.append)
+        w._poll_status()
+        assert snaps[-1]["vacuum_turbo"] in ("Normal", "Accelerating")
+        assert snaps[-1]["vacuum_backing"] == "Running"
+        # offline -> no pump status (None, shown as '--')
+        w.disconnect_device("vacuum")
+        assert snaps[-1]["vacuum_turbo"] is None
+    finally:
+        sys.close_all()
+
+
 def test_unknown_device_emits_error(qapp):
     sys = build_system(dummy=True)
     sys.open_all()

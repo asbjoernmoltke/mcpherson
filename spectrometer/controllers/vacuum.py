@@ -42,6 +42,21 @@ class VacuumController(Controller):
     def units(self) -> str:
         return self.driver.units
 
+    # --- read-only pump status (display only; never commands the pumps) ---
+    @property
+    def turbo_state(self) -> str | None:
+        try:
+            return self.driver.read_turbo_state()
+        except Exception:
+            return None
+
+    @property
+    def backing_state(self) -> str | None:
+        try:
+            return self.driver.read_backing_state()
+        except Exception:
+            return None
+
     @property
     def vacuum_ok(self) -> bool:
         """True when pressure is at/below the safe cooling threshold. A read
