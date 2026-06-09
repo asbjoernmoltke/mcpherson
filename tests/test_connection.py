@@ -85,6 +85,30 @@ def test_laser_offline_defaults_are_safe(qapp):
         sys.close_all()
 
 
+def test_mp789_defers_connection_to_open():
+    # Constructing the real grating driver must NOT touch the port (so the GUI
+    # can build with the grating offline); open() reports a missing port.
+    from spectrometer.drivers.mcpherson import MP_789A_4
+    drv = MP_789A_4("COM_NOPE")
+    assert not drv.is_connected
+    with pytest.raises(RuntimeError):
+        drv.open()
+    assert not drv.is_connected
+
+
+def test_real_bundle_constructs_without_connecting():
+    # build_devices(dummy=False) builds the real drivers but connects nothing,
+    # so a missing/offline rig never blocks construction of the system.
+    from spectrometer.drivers.factory import build_devices
+    b = build_devices(dummy=False, grating_port="COM_NOPE",
+                      laser_interface="cli", laser_port="COM_NOPE",
+                      vacuum_port="COM_NOPE")
+    assert not b.camera.is_connected
+    assert not b.grating.is_connected
+    assert not b.laser.is_connected
+    assert not b.vacuum.is_connected
+
+
 def test_unknown_device_emits_error(qapp):
     sys = build_system(dummy=True)
     sys.open_all()

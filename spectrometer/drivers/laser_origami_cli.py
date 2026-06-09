@@ -93,6 +93,16 @@ class OrigamiCLI(LaserDriver):
 
     # --- lifecycle ----------------------------------------------------
     def open(self) -> None:
+        if self.is_connected:
+            return
+        # Ensure the laser's serial interface is in CLI mode first (best-effort;
+        # if the mode-switch path is unavailable we still try the CLI port).
+        try:
+            from . import origami_mode
+            origami_mode.ensure_mode(self.port, "cli")
+        except Exception as exc:
+            log.error("Origami CLI mode-ensure failed (%s); opening CLI port "
+                      "anyway." % exc)
         self._ser = serial.Serial(
             port=self.port, baudrate=CLI_BAUD, bytesize=serial.EIGHTBITS,
             stopbits=serial.STOPBITS_ONE, rtscts=False, timeout=self.timeout)

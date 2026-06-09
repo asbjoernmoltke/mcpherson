@@ -85,25 +85,13 @@ def build_devices(dummy: bool = False, *, grating_port: str = "COM5",
 
 
 def _build_origami(interface: str, port: str | None):
-    """Pick the Origami driver and ensure the laser is in the matching mode."""
-    from . import origami_mode
-
+    """Construct the Origami driver (no I/O here -- the driver's open() ensures
+    the matching serial mode and connects, so build never touches the port)."""
     interface = interface.lower()
     if interface == "cli":
-        port = port or "COM6"  # confirmed FTDI port; override via laser_port
-        try:
-            origami_mode.ensure_mode(port, "cli")
-        except Exception as exc:
-            log.error("Origami CLI mode-ensure failed (%s); will still try to "
-                      "open the CLI port." % exc)
         from .laser_origami_cli import OrigamiCLI
-        return OrigamiCLI(port)
+        return OrigamiCLI(port or "COM6")  # confirmed FTDI port; override via laser_port
     elif interface == "interbus":
-        if port:
-            try:
-                origami_mode.ensure_mode(port, "nktpbus")
-            except Exception as exc:
-                log.error("Origami NKTPBus mode-ensure failed: %s" % exc)
         from .laser_nkt import OrigamiXPS
         return OrigamiXPS(port)
     raise ValueError("laser_interface must be 'cli' or 'interbus'.")

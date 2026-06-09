@@ -86,65 +86,28 @@ class MP_789A_4(GratingDriver):
             RuntimeError: Raised is the SafeSerial object is NoneType.
         """
 
-        # Default values for the class.
+        # Store config only; the actual serial connection + handshake + the
+        # movement watchdog are deferred to open(), so the GUI can start with
+        # the grating offline and (re)connect on demand from its panel.
         self.s_name = 'MP789'
         self.l_name = 'McPherson 789A-4'
+        self.port = port
+        self.s = None
         self._homing = False
         self._moving = False
         self.moving_poll_mutex = Lock()
         self._backlash_lock = False
         self.stop_queued = 0
         self._position = 0
-
         self._home_speed_mult = 1
         self._move_speed_mult = 1
+        self._watchdog_stop = None
+        self.movement_status_tid = None
 
-        log.info('Attempting to connect to McPherson Model 789A-4 Scan Controller on port %s.'%(port))
-
-        # Check if we were given a port.
+        # A None port is a misconfiguration (not an offline condition), so it is
+        # still rejected eagerly; a missing/busy port is reported by open().
         if port is None:
-            log.error('Port is none type.')
             raise RuntimeError('Port is none type.')
-        
-        # Check if the port is available.
-        ser_ports = ports_finder.find_serial_ports()
-        if port not in ser_ports:
-            log.error('Port not valid. Is another program using the port?')
-            raise RuntimeError('Port not valid. Is another program using the port?')
-
-        # Get a SafeSerial connection on the port and begin communication.
-        self.s = safe_serial.SafeSerial(port, 9600, timeout=0.3)
-
-        # self.s.write(b' ')
-        # time.sleep(MP_789A_4.WR_DLY)
-        # rx = self.s.read(128)#.decode('utf-8').rstrip()
-
-        rx = self.s.xfer([b' '])
-
-        log.debug(rx)
-
-        # Check the response to ensure connection to a 789A-4.
-        if rx is None or rx == b'':
-            raise RuntimeError('Response timed out.')
-        elif rx == b' v2.55\r\n#\r\n':
-            log.info('McPherson model 789A-4 Scan Controller found.')
-        elif rx == b' #\r\n':
-            log.info('McPherson model 789A-4 Scan Controller already initialized.')
-        else:
-            raise RuntimeError('Invalid response.')
-
-        if self.s is None:
-            raise RuntimeError('self.s is None')
-
-        # Starting movement watchdog. Daemon + a stop event so the process can
-        # exit cleanly and close() can join it (the original looped forever).
-        self._watchdog_stop = threading.Event()
-        self.movement_status_tid = threading.Thread(
-            target=self.movement_status_thread, daemon=True)
-        self.movement_status_tid.start()
-
-        # Home the 789A-4.
-        # self.home()
 
     def movement_status_thread(self):
         # This thread runs in the background.
@@ -581,7 +544,46 @@ class MP_789A_4(GratingDriver):
         return self.l_name
     
     def open(self):
-        pass
+        """Connect to the controller: open the serial port, handshake, and
+        start the movement watchdog. Idempotent; safe to call again to
+        reconnect after close()."""
+        if self.is_connected:
+            return
+        log.info('Connecting to McPherson 789A-4 on %s.' % self.port)
+        if self.port not in ports_finder.find_serial_ports():
+            raise RuntimeError(
+                'Port %s not available (not present, or in use by another '
+                'program).' % self.port)
+        self.s = safe_serial.SafeSerial(self.port, 9600, timeout=0.3)
+        try:
+            rx = self.s.xfer([b' '])
+        except Exception as exc:
+            self._drop_serial()
+            raise RuntimeError('789A-4 handshake failed on %s: %s'
+                               % (self.port, exc))
+        if rx == b' v2.55\r\n#\r\n':
+            log.info('McPherson 789A-4 found on %s (fw v2.55).' % self.port)
+        elif rx == b' #\r\n':
+            log.info('McPherson 789A-4 on %s (already initialised).' % self.port)
+        else:
+            self._drop_serial()
+            raise RuntimeError('Invalid/timed-out 789A-4 response on %s: %r'
+                               % (self.port, rx))
+        # Start the movement watchdog (fresh daemon thread + stop event so a
+        # reconnect after close() gets a new, joinable thread).
+        self._watchdog_stop = threading.Event()
+        self.movement_status_tid = threading.Thread(
+            target=self.movement_status_thread, daemon=True)
+        self.movement_status_tid.start()
+
+    def _drop_serial(self):
+        """Close + forget the serial handle (used on a failed open)."""
+        try:
+            if self.s is not None:
+                self.s.close()
+        except Exception:
+            pass
+        self.s = None
 
     def close(self):
         # Stop the watchdog before closing the port so it doesn't poll a
@@ -592,7 +594,9 @@ class MP_789A_4(GratingDriver):
         tid = getattr(self, "movement_status_tid", None)
         if tid is not None and tid.is_alive():
             tid.join(timeout=1.0)
-        self.s.close()
+        if self.s is not None:
+            self.s.close()
+            self.s = None
 
     @property
     def is_connected(self) -> bool:

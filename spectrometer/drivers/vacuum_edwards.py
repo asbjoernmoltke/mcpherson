@@ -79,6 +79,8 @@ class EdwardsTIC(VacuumDriver):
 
     # --- lifecycle ----------------------------------------------------
     def open(self) -> None:
+        if self.is_connected:
+            return
         self._ser = serial.Serial(
             port=self.port, baudrate=self.baudrate, bytesize=serial.EIGHTBITS,
             stopbits=serial.STOPBITS_ONE, parity=serial.PARITY_NONE,

@@ -423,6 +423,16 @@ class OrigamiXPS(LaserDriver):
 
     # --- lifecycle ----------------------------------------------------
     def open(self) -> None:
+        if self._connected:
+            return
+        # Ensure the laser's serial interface is in NKTPBus mode first
+        # (best-effort; only if we already know the port).
+        if self.port:
+            try:
+                from . import origami_mode
+                origami_mode.ensure_mode(self.port, "nktpbus")
+            except Exception as exc:
+                log.error("Origami NKTPBus mode-ensure failed: %s" % exc)
         nkt = self._api()
         modules = self.find_modules()
         open_ports = [p for p in nkt.getOpenPorts().split(",") if p]
