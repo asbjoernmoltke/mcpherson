@@ -76,43 +76,106 @@ class HardwareWorker(QObject):
             self._timer = None
 
     def _poll_status(self) -> None:
+        """Build the status snapshot defensively: each device's section is
+        guarded by its connection state so an offline (or failing) device
+        reports 'offline' rather than breaking the whole poll."""
         s = self.system
+        d = s.devices
         try:
-            s.vacuum.poll()
-            s.safety.check_vacuum_while_cold()
-            self._drive_warmup()        # non-blocking warm-up state machine
-            snapshot = {
-                "camera": s.camera.status,
-                "temperature": s.camera.temperature,
-                "cooler_on": s.devices.camera.is_cooler_on(),
-                "stable": s.devices.camera.is_temperature_stable(),
-                "cooled": s.camera.is_cooled,
-                "cool_progress": s.camera.cooldown_progress(),
-                "warming": self._warming,
-                "can_acquire": s.safety.can_acquire,
-                "grating": s.grating.status,
-                "position": s.grating.position,
-                "homed": s.grating.is_homed,
-                "shutter": s.shutter.status,
-                "shutter_open": s.shutter.is_open,
-                "laser": s.laser.status,
-                "laser_on": s.laser.is_enabled,
-                "laser_stage": s.laser.emission_stage,
-                "laser_power": s.laser.read_power_percent(),
-                "laser_pp_ratio": s.laser.read_pulse_picker_ratio(),
-                "laser_rep_rate": s.laser.read_repetition_rate_hz(),
-                "laser_supports_power": s.laser.supports_power,
-                "laser_supports_pp": s.laser.supports_pulse_picker,
-                "laser_supports_rep": s.laser.supports_rep_rate,
-                "laser_allowed_rep_rates": s.laser.allowed_rep_rates_hz(),
-                "vacuum": s.vacuum.status,
-                "vacuum_ok": s.vacuum.vacuum_ok,
-                "estopped": s.safety.is_estopped,
-                "busy": self._busy,
+            conn = {
+                "camera": d.camera.is_connected,
+                "grating": d.grating.is_connected,
+                "shutter": d.shutter.is_connected,
+                "laser": d.laser.is_connected,
+                "vacuum": d.vacuum.is_connected,
             }
-            self.status_updated.emit(snapshot)
+            snap = {"connections": conn, "estopped": s.safety.is_estopped,
+                    "busy": self._busy, "warming": self._warming}
+
+            # vacuum first (the cooling interlock depends on it)
+            if conn["vacuum"]:
+                try:
+                    s.vacuum.poll()
+                    s.safety.check_vacuum_while_cold()
+                    snap.update(vacuum=s.vacuum.status, vacuum_ok=s.vacuum.vacuum_ok)
+                except Exception as exc:
+                    log.error("Vacuum poll failed: %s" % exc)
+                    snap.update(vacuum="error", vacuum_ok=False)
+            else:
+                snap.update(vacuum="offline", vacuum_ok=False)
+
+            if conn["camera"]:
+                self._drive_warmup()        # non-blocking warm-up state machine
+                snap.update(
+                    camera=s.camera.status, temperature=s.camera.temperature,
+                    cooler_on=d.camera.is_cooler_on(),
+                    stable=d.camera.is_temperature_stable(),
+                    cooled=s.camera.is_cooled,
+                    cool_progress=s.camera.cooldown_progress())
+            else:
+                snap.update(camera="offline", temperature=float("nan"),
+                            cooler_on=False, stable=False, cooled=False,
+                            cool_progress=0.0)
+            # acquisition needs the camera connected (and no e-stop/abort)
+            snap["can_acquire"] = conn["camera"] and s.safety.can_acquire
+
+            if conn["grating"]:
+                snap.update(grating=s.grating.status, position=s.grating.position,
+                            homed=s.grating.is_homed)
+            else:
+                snap.update(grating="offline", position=0, homed=False)
+
+            if conn["shutter"]:
+                snap.update(shutter=s.shutter.status, shutter_open=s.shutter.is_open)
+            else:
+                snap.update(shutter="offline", shutter_open=False)
+
+            if conn["laser"]:
+                snap.update(
+                    laser=s.laser.status, laser_on=s.laser.is_enabled,
+                    laser_stage=s.laser.emission_stage,
+                    laser_power=s.laser.read_power_percent(),
+                    laser_pp_ratio=s.laser.read_pulse_picker_ratio(),
+                    laser_rep_rate=s.laser.read_repetition_rate_hz(),
+                    laser_supports_power=s.laser.supports_power,
+                    laser_supports_pp=s.laser.supports_pulse_picker,
+                    laser_supports_rep=s.laser.supports_rep_rate,
+                    laser_allowed_rep_rates=s.laser.allowed_rep_rates_hz())
+            else:
+                snap.update(
+                    laser="offline", laser_on=False, laser_stage="--",
+                    laser_power=None, laser_pp_ratio=None, laser_rep_rate=None,
+                    laser_supports_power=False, laser_supports_pp=False,
+                    laser_supports_rep=False, laser_allowed_rep_rates=None)
+
+            self.status_updated.emit(snap)
         except Exception as exc:  # pragma: no cover - defensive
             log.error("Status poll failed: %s" % exc)
+
+    # --- connection management ----------------------------------------
+    @pyqtSlot(str)
+    def connect_device(self, key: str) -> None:
+        dev = getattr(self.system.devices, key, None)
+        if dev is None:
+            self.error.emit("Unknown device: %s" % key)
+            return
+        try:
+            dev.open()
+        except Exception as exc:
+            self.error.emit("Connect %s failed: %s" % (key, exc))
+        self._poll_status()
+
+    @pyqtSlot(str)
+    def disconnect_device(self, key: str) -> None:
+        dev = getattr(self.system.devices, key, None)
+        if dev is None:
+            self.error.emit("Unknown device: %s" % key)
+            return
+        try:
+            dev.close()
+        except Exception as exc:
+            self.error.emit("Disconnect %s failed: %s" % (key, exc))
+        self._poll_status()
 
     # --- long operations (queued slots) -------------------------------
     def _set_busy(self, busy: bool) -> None:

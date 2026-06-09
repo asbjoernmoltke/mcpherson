@@ -15,8 +15,15 @@ def run_gui(dummy: bool = False) -> int:
 
     settings = Settings.load()
     system = build_system_from_settings(settings, dummy=dummy)
+    # Best-effort open: a device that fails to connect starts 'offline' and can
+    # be connected later from its panel, rather than blocking the whole GUI.
     log.info("Opening devices (dummy=%s)..." % dummy)
-    system.open_all()
+    for name in ("vacuum", "shutter", "laser", "grating", "camera"):
+        try:
+            getattr(system.devices, name).open()
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            log.error("Could not open %s: %s -- starting offline (use Connect)."
+                      % (name, exc))
 
     app = QApplication(sys.argv)
     window = MainWindow(system, settings)

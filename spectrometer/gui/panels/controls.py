@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (QComboBox, QDoubleSpinBox, QGridLayout, QGroupBox,
                              QHBoxLayout, QLabel, QProgressBar, QPushButton,
                              QSpinBox, QVBoxLayout, QWidget)
 
-from ..widgets import LabeledValue, StatusLamp
+from ..widgets import ConnectionBar, LabeledValue, StatusLamp
 
 
 def _lamp_state(ok: bool) -> str:
@@ -32,6 +32,10 @@ class CameraPanel(QGroupBox):
     def __init__(self):
         super().__init__("Camera")
         layout = QVBoxLayout(self)
+
+        self.conn = ConnectionBar("camera")
+        self.connection_bars = [self.conn]
+        layout.addWidget(self.conn)
 
         self._temp = LabeledValue("Temperature")
         self._status = LabeledValue("Status")
@@ -173,6 +177,9 @@ class VacuumPanel(QGroupBox):
     def __init__(self):
         super().__init__("Vacuum")
         layout = QVBoxLayout(self)
+        self.conn = ConnectionBar("vacuum")
+        self.connection_bars = [self.conn]
+        layout.addWidget(self.conn)
         self._pressure = LabeledValue("Pressure")
         self._ok = StatusLamp("Safe to cool")
         layout.addWidget(self._pressure)
@@ -192,6 +199,9 @@ class GratingPanel(QGroupBox):
     def __init__(self):
         super().__init__("Grating")
         layout = QVBoxLayout(self)
+        self.conn = ConnectionBar("grating")
+        self.connection_bars = [self.conn]
+        layout.addWidget(self.conn)
         self._position = LabeledValue("Position (steps)")
         self._status = LabeledValue("Status")
         self._homed = StatusLamp("Homed")
@@ -261,6 +271,11 @@ class ShutterLaserPanel(QGroupBox):
     def __init__(self):
         super().__init__("Shutter / Laser")
         layout = QVBoxLayout(self)
+        self.shutter_conn = ConnectionBar("shutter")
+        self.laser_conn = ConnectionBar("laser")
+        self.connection_bars = [self.shutter_conn, self.laser_conn]
+        layout.addWidget(self.shutter_conn)
+        layout.addWidget(self.laser_conn)
         self._shutter_lamp = StatusLamp("Shutter")
         self._laser_lamp = StatusLamp("Laser")
         self._stage = LabeledValue("Emission stage")

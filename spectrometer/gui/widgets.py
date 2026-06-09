@@ -1,9 +1,9 @@
 """Small reusable Qt widgets (ports of the old customtkinter kit)."""
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 
 class StatusLamp(QWidget):
@@ -48,6 +48,45 @@ class _Dot(QWidget):
         p.setBrush(self._color)
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(1, 1, 12, 12)
+
+
+class ConnectionBar(QWidget):
+    """Per-device connection row: a status dot + 'Connection: online/offline'
+    + a Connect/Disconnect button. Carries its device key and emits it, so the
+    MainWindow can route the request to the right driver."""
+
+    connect_requested = pyqtSignal(str)
+    disconnect_requested = pyqtSignal(str)
+
+    _COLORS = {True: QColor(40, 200, 80), False: QColor(120, 120, 120)}
+
+    def __init__(self, device_key: str):
+        super().__init__()
+        self.device_key = device_key
+        self._connected = False
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        self._dot = _Dot(self._COLORS[False])
+        self._text = QLabel("Connection: offline")
+        self._btn = QPushButton("Connect")
+        self._btn.setMaximumWidth(110)
+        layout.addWidget(self._dot)
+        layout.addWidget(self._text)
+        layout.addStretch(1)
+        layout.addWidget(self._btn)
+        self._btn.clicked.connect(self._on_click)
+
+    def _on_click(self) -> None:
+        if self._connected:
+            self.disconnect_requested.emit(self.device_key)
+        else:
+            self.connect_requested.emit(self.device_key)
+
+    def set_connected(self, connected: bool) -> None:
+        self._connected = connected
+        self._dot.set_color(self._COLORS[connected])
+        self._text.setText("Connection: online" if connected else "Connection: offline")
+        self._btn.setText("Disconnect" if connected else "Connect")
 
 
 class LabeledValue(QWidget):

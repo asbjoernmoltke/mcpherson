@@ -57,6 +57,22 @@ vacuum all have real drivers; **shutter** is still dummy-only). See
 - [ ] Real shutter driver once hardware is chosen (TTL/serial); confirm
   open/close travel time for sync settle.
 
+## Connection management
+
+- [x] **Per-device connect/disconnect** — each hardware panel has a
+  `ConnectionBar` (status + Connect/Disconnect); offline-safe status poll;
+  best-effort open at startup so the GUI launches with devices offline.
+- [ ] **Defer real-driver connection to `open()`** — the connect/disconnect
+  bars fully work with the dummies, but the REAL drivers (`MP_789A_4`,
+  `EdwardsTIC`, `OrigamiCLI`) connect in their *constructor* and their
+  `open()` is a no-op, so on hardware: (a) a missing port fails at build time
+  (not start-offline), and (b) Connect won't re-open a closed port. Refactor
+  the real drivers to connect/reconnect in `open()` for the bars to work on
+  hardware. (Also enables real COM-port auto-detection / re-scan.)
+- [ ] **COM-port auto-detection** — currently ports are fixed in `Settings`
+  (grating COM5, vacuum COM7, laser COM6/NKT bus scan); add identify-by-
+  handshake over `ports_finder.find_serial_ports()` to auto-assign devices.
+
 ## Optional / polish
 
 - [ ] Dark-frame & background subtraction.

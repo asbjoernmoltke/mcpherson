@@ -628,6 +628,7 @@ class DummyGrating(GratingDriver):
     def __init__(self, port: str | None = "DUMMY"):
         self.s_name = "MP789_DUMMY"
         self.l_name = "McPherson 789A-4 (DUMMY)"
+        self._connected = False
         self._position = 0
         self._moving = False
         self._homing = False
@@ -638,16 +639,20 @@ class DummyGrating(GratingDriver):
 
     # --- Driver lifecycle ---------------------------------------------
     def open(self) -> None:
+        self._connected = True
         log.info("DummyGrating open.")
 
     def close(self) -> None:
+        self._connected = False
         log.info("DummyGrating close.")
 
     @property
     def is_connected(self) -> bool:
-        return True
+        return self._connected
 
     def get_status(self) -> str:
+        if not self._connected:
+            return "Disconnected"
         if self._homing:
             return "Homing"
         if self._moving:

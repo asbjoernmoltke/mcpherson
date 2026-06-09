@@ -41,6 +41,8 @@ class MainWindow(QMainWindow):
     _rep_rate = pyqtSignal(float)
     _record = pyqtSignal(object)
     _live = pyqtSignal()
+    _connect_dev = pyqtSignal(str)
+    _disconnect_dev = pyqtSignal(str)
     _start_polling = pyqtSignal()
 
     def __init__(self, system: System, settings=None):
@@ -172,6 +174,16 @@ class MainWindow(QMainWindow):
         self.acq_panel.record_requested.connect(self._on_record)
         self.acq_panel.live_toggled.connect(self._on_live_toggled)
 
+        # per-device connect/disconnect bars (across all hardware panels)
+        self._connect_dev.connect(w.connect_device)
+        self._disconnect_dev.connect(w.disconnect_device)
+        self._conn_bars = []
+        for p in self._panels:
+            for bar in getattr(p, "connection_bars", []):
+                self._conn_bars.append(bar)
+                bar.connect_requested.connect(self._connect_dev.emit)
+                bar.disconnect_requested.connect(self._disconnect_dev.emit)
+
         # E-stop: direct, not via worker thread
         self.estop_btn.clicked.connect(self._on_estop)
 
@@ -190,6 +202,9 @@ class MainWindow(QMainWindow):
 
     # --- handlers ------------------------------------------------------
     def _on_status(self, snapshot: dict) -> None:
+        conns = snapshot.get("connections", {})
+        for bar in self._conn_bars:
+            bar.set_connected(conns.get(bar.device_key, False))
         for p in self._panels:
             p.update(snapshot)
         if snapshot["estopped"]:
