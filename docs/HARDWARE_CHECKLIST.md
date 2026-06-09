@@ -97,8 +97,22 @@ SDK2 (Driver Pack 2), tested on hw AG20.24 / SDK 2.104.33000.0. Driver:
 | ☑ | 🔧 **Detector size / pixels** | Spectrum length + calibration | **1024 × 256**, 26 µm | `NEWTON_*`; calibration `n_pixels=1024` |
 | ☑ | 🔧 **Model + SDK** | pylablib backend | Newton = **SDK2** (`AndorSDK2Camera`), `C:/Program Files/Andor Driver Pack 2` | `AndorCamera.sdk2_path` |
 | ☑ | 📋 **Saturation level** | Guard threshold | `65000` (16-bit ADC; full-well 457,768 e⁻) | `SATURATION_LEVEL` |
-| ☐ | 🔧 **Internal shutter / trigger mode** | Camera shutter vs external; sync | internal trigger assumed | `CameraController.configure` |
-| ☐ | 📋 **A/D rate + preamp gain** | Sensitivity/noise | 3/1/0.05 MHz × ×1/×2/×4 (not exposed yet) | future `configure` |
+| ☐ | 🔧 **Internal shutter / trigger mode** | Camera shutter vs external; sync | exposed in GUI; defaults assumed — confirm enum at Stage A | `CameraController.configure` |
+| ◐ | 📋 **A/D rate + preamp gain** | Sensitivity/noise | exposed in the Camera panel; **verify the index<->mode mapping at Stage A** | `AndorCamera.set_amp_mode`; `discover_andor.py` |
+
+**Bring-up plan (read-only first; cooling is vacuum-gated):**
+- **Stage A — identify (SAFE, no cooling):** `python tests/discover_andor.py` —
+  reads model/detector size/temperature/cooler+fan state and the amp-mode /
+  readout-rate / pre-amp / EM-gain enumeration (to check the driver's mapping).
+- **Stage B — uncooled acquisition:** single + live frames at ambient (cooling
+  isn't required to acquire); check frame shape/bit-depth + saturation guard.
+- **Stage C — cooling lifecycle (HIGH RISK; only under vacuum):** `cooldown()`
+  → watch ramp + `cooldown_progress` → `wait_until_stable` → cooled frame →
+  `safe_shutdown` (controlled warm-up to `warm_target_c` then cooler off).
+- **Stage D — interlock proof:** confirm `cooldown()` is REFUSED when the gauge
+  reads above `cooling_threshold`.
+- **Stage E — fan policy:** confirm air-cooled `'full'` vs water `'off'`.
+  Stages A-B anytime the camera is powered; C-E require the chamber at vacuum.
 
 ---
 
