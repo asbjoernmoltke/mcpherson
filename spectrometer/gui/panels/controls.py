@@ -261,41 +261,56 @@ class GratingPanel(QGroupBox):
         self._grating.setEnabled(not s.get("busy", False))
 
 
-class ShutterLaserPanel(QGroupBox):
+class ShutterPanel(QGroupBox):
+    """Beam shutter -- independent of the laser, so its own panel."""
     shutter_toggled = pyqtSignal(bool)
+
+    def __init__(self):
+        super().__init__("Shutter")
+        layout = QVBoxLayout(self)
+        self.conn = ConnectionBar("shutter", "Shutter")
+        self.connection_bars = [self.conn]
+        layout.addWidget(self.conn)
+        self._lamp = StatusLamp("Shutter")
+        layout.addWidget(self._lamp)
+
+        row = QHBoxLayout()
+        self._open = QPushButton("Open shutter")
+        self._close = QPushButton("Close shutter")
+        row.addWidget(self._open)
+        row.addWidget(self._close)
+        layout.addLayout(row)
+
+        self._open.clicked.connect(lambda: self.shutter_toggled.emit(True))
+        self._close.clicked.connect(lambda: self.shutter_toggled.emit(False))
+
+    def update(self, s: dict) -> None:
+        self._lamp.set_state("warn" if s["shutter_open"] else "ok")
+
+
+class LaserPanel(QGroupBox):
     laser_toggled = pyqtSignal(bool)
     power_changed = pyqtSignal(float)
     pulse_picker_changed = pyqtSignal(int)
     rep_rate_changed = pyqtSignal(float)  # Hz
 
     def __init__(self):
-        super().__init__("Shutter / Laser")
+        super().__init__("Laser")
         layout = QVBoxLayout(self)
-        self.shutter_conn = ConnectionBar("shutter", "Shutter")
-        self.laser_conn = ConnectionBar("laser", "Laser")
-        self.connection_bars = [self.shutter_conn, self.laser_conn]
-        layout.addWidget(self.shutter_conn)
-        layout.addWidget(self.laser_conn)
-        self._shutter_lamp = StatusLamp("Shutter")
-        self._laser_lamp = StatusLamp("Laser")
+        self.conn = ConnectionBar("laser", "Laser")
+        self.connection_bars = [self.conn]
+        layout.addWidget(self.conn)
+        self._lamp = StatusLamp("Laser")
         self._stage = LabeledValue("Emission stage")
-        layout.addWidget(self._shutter_lamp)
-        layout.addWidget(self._laser_lamp)
+        layout.addWidget(self._lamp)
         layout.addWidget(self._stage)
 
         row = QHBoxLayout()
-        self._shutter_open = QPushButton("Open shutter")
-        self._shutter_close = QPushButton("Close shutter")
-        row.addWidget(self._shutter_open)
-        row.addWidget(self._shutter_close)
-        layout.addLayout(row)
-
-        row2 = QHBoxLayout()
         self._laser_on = QPushButton("Enable laser")
         self._laser_off = QPushButton("Disable laser")
-        row2.addWidget(self._laser_on)
-        row2.addWidget(self._laser_off)
-        layout.addLayout(row2)
+        row.addWidget(self._laser_on)
+        row.addWidget(self._laser_off)
+        layout.addLayout(row)
 
         # --- power / pulse-picker / rep-rate (each: spin + Apply) -----
         grid = QGridLayout()
@@ -325,8 +340,6 @@ class ShutterLaserPanel(QGroupBox):
         self._rep_actual = LabeledValue("Actual rep. rate")
         layout.addWidget(self._rep_actual)
 
-        self._shutter_open.clicked.connect(lambda: self.shutter_toggled.emit(True))
-        self._shutter_close.clicked.connect(lambda: self.shutter_toggled.emit(False))
         self._laser_on.clicked.connect(lambda: self.laser_toggled.emit(True))
         self._laser_off.clicked.connect(lambda: self.laser_toggled.emit(False))
         self._power_btn.clicked.connect(
@@ -355,11 +368,9 @@ class ShutterLaserPanel(QGroupBox):
         return f"{hz:.1f} Hz"
 
     def update(self, s: dict) -> None:
-        self._shutter_lamp.set_state("warn" if s["shutter_open"] else "ok")
-        self._laser_lamp.set_state("warn" if s["laser_on"] else "ok")
+        self._lamp.set_state("warn" if s["laser_on"] else "ok")
         self._stage.set_value(s.get("laser_stage", "--"))
 
-        power = s.get("laser_power")
         self._power_btn.setEnabled(s.get("laser_supports_power", False))
         self._power.setEnabled(s.get("laser_supports_power", False))
 

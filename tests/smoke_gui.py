@@ -42,9 +42,9 @@ def main() -> int:
     QTimer.singleShot(700, win.grating_panel.home_requested.emit)
     QTimer.singleShot(1300, lambda: win.acq_panel.scan_requested.emit(380.0, 520.0))
     # Exercise the new laser controls (power / pulse-picker / rep-rate).
-    QTimer.singleShot(2100, lambda: win.shutter_laser_panel.power_changed.emit(42.0))
-    QTimer.singleShot(2300, lambda: win.shutter_laser_panel.pulse_picker_changed.emit(8))
-    QTimer.singleShot(2500, lambda: win.shutter_laser_panel.rep_rate_changed.emit(1.0e6))
+    QTimer.singleShot(2100, lambda: win.laser_panel.power_changed.emit(42.0))
+    QTimer.singleShot(2300, lambda: win.laser_panel.pulse_picker_changed.emit(8))
+    QTimer.singleShot(2500, lambda: win.laser_panel.rep_rate_changed.emit(1.0e6))
     QTimer.singleShot(3100, win._on_estop)
     QTimer.singleShot(3600, app.quit)
 

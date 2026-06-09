@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (QHBoxLayout, QMainWindow, QMessageBox, QScrollArea,
 from ..core.system import System
 from .estop import EStopButton, SafetyBanner
 from .panels.controls import (AcquisitionPanel, CameraPanel, GratingPanel,
-                              ShutterLaserPanel, VacuumPanel)
+                              LaserPanel, ShutterPanel, VacuumPanel)
 from .panels.preview import PreviewPanel
 from .worker import HardwareWorker
 
@@ -51,19 +51,20 @@ class MainWindow(QMainWindow):
         from ..core.settings import Settings
         self.settings = settings if settings is not None else Settings()
         self.setWindowTitle("McPherson Spectrometer")
-        self.resize(1500, 950)
+        self.resize(1700, 950)
 
         # --- panels -----------------------------------------------------
         self.camera_panel = CameraPanel()
         self.vacuum_panel = VacuumPanel()
         self.grating_panel = GratingPanel()
-        self.shutter_laser_panel = ShutterLaserPanel()
+        self.shutter_panel = ShutterPanel()
+        self.laser_panel = LaserPanel()
         self.acq_panel = AcquisitionPanel()
         self.preview = PreviewPanel()
         self.banner = SafetyBanner()
         self.estop_btn = EStopButton()
         self._panels = [self.camera_panel, self.vacuum_panel, self.grating_panel,
-                        self.shutter_laser_panel, self.acq_panel]
+                        self.shutter_panel, self.laser_panel, self.acq_panel]
 
         self._build_layout()
 
@@ -103,18 +104,30 @@ class MainWindow(QMainWindow):
 
     # --- layout --------------------------------------------------------
     def _build_layout(self) -> None:
+        # Controls live in TWO columns (the panels are independent), with the
+        # safety banner spanning the top and the E-stop spanning the bottom.
         controls = QWidget()
-        cl = QVBoxLayout(controls)
-        cl.addWidget(self.banner)
-        for p in self._panels:
-            cl.addWidget(p)
-        cl.addStretch(1)
-        cl.addWidget(self.estop_btn)
+        outer = QVBoxLayout(controls)
+        outer.addWidget(self.banner)
+
+        cols = QHBoxLayout()
+        col_a = QVBoxLayout()
+        for p in (self.camera_panel, self.vacuum_panel, self.grating_panel):
+            col_a.addWidget(p)
+        col_a.addStretch(1)
+        col_b = QVBoxLayout()
+        for p in (self.shutter_panel, self.laser_panel, self.acq_panel):
+            col_b.addWidget(p)
+        col_b.addStretch(1)
+        cols.addLayout(col_a)
+        cols.addLayout(col_b)
+        outer.addLayout(cols)
+        outer.addWidget(self.estop_btn)
 
         scroll = QScrollArea()
         scroll.setWidget(controls)
         scroll.setWidgetResizable(True)
-        scroll.setMinimumWidth(360)
+        scroll.setMinimumWidth(720)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         central = QWidget()
@@ -163,11 +176,11 @@ class MainWindow(QMainWindow):
         self.grating_panel.goto_requested.connect(self._goto.emit)
         self.grating_panel.stop_requested.connect(self._on_grating_stop)
         self.grating_panel.grating_changed.connect(self._grating.emit)
-        self.shutter_laser_panel.shutter_toggled.connect(self._shutter.emit)
-        self.shutter_laser_panel.laser_toggled.connect(self._laser.emit)
-        self.shutter_laser_panel.power_changed.connect(self._laser_power.emit)
-        self.shutter_laser_panel.pulse_picker_changed.connect(self._pulse_picker.emit)
-        self.shutter_laser_panel.rep_rate_changed.connect(self._rep_rate.emit)
+        self.shutter_panel.shutter_toggled.connect(self._shutter.emit)
+        self.laser_panel.laser_toggled.connect(self._laser.emit)
+        self.laser_panel.power_changed.connect(self._laser_power.emit)
+        self.laser_panel.pulse_picker_changed.connect(self._pulse_picker.emit)
+        self.laser_panel.rep_rate_changed.connect(self._rep_rate.emit)
         self.acq_panel.single_requested.connect(self._on_single)
         self.acq_panel.scan_requested.connect(self._on_scan)
         self.acq_panel.abort_requested.connect(self._on_abort)
