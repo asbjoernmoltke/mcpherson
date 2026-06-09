@@ -271,8 +271,6 @@ class ShutterPanel(QGroupBox):
         self.conn = ConnectionBar("shutter", "Shutter")
         self.connection_bars = [self.conn]
         layout.addWidget(self.conn)
-        self._lamp = StatusLamp("Shutter")
-        layout.addWidget(self._lamp)
 
         row = QHBoxLayout()
         self._open = QPushButton("Open shutter")
@@ -285,7 +283,10 @@ class ShutterPanel(QGroupBox):
         self._close.clicked.connect(lambda: self.shutter_toggled.emit(False))
 
     def update(self, s: dict) -> None:
-        self._lamp.set_state("warn" if s["shutter_open"] else "ok")
+        # Open/closed is shown by which button is active (no separate lamp).
+        is_open = bool(s.get("shutter_open", False))
+        self._open.setEnabled(not is_open)
+        self._close.setEnabled(is_open)
 
 
 class LaserPanel(QGroupBox):
@@ -300,9 +301,7 @@ class LaserPanel(QGroupBox):
         self.conn = ConnectionBar("laser", "Laser")
         self.connection_bars = [self.conn]
         layout.addWidget(self.conn)
-        self._lamp = StatusLamp("Laser")
         self._stage = LabeledValue("Emission stage")
-        layout.addWidget(self._lamp)
         layout.addWidget(self._stage)
 
         row = QHBoxLayout()
@@ -368,7 +367,6 @@ class LaserPanel(QGroupBox):
         return f"{hz:.1f} Hz"
 
     def update(self, s: dict) -> None:
-        self._lamp.set_state("warn" if s["laser_on"] else "ok")
         self._stage.set_value(s.get("laser_stage", "--"))
 
         self._power_btn.setEnabled(s.get("laser_supports_power", False))

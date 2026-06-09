@@ -51,7 +51,7 @@ class MainWindow(QMainWindow):
         from ..core.settings import Settings
         self.settings = settings if settings is not None else Settings()
         self.setWindowTitle("McPherson Spectrometer")
-        self.resize(1700, 950)
+        self.resize(1800, 950)
 
         # --- panels -----------------------------------------------------
         self.camera_panel = CameraPanel()
@@ -127,7 +127,7 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidget(controls)
         scroll.setWidgetResizable(True)
-        scroll.setMinimumWidth(720)
+        scroll.setMinimumWidth(820)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         central = QWidget()
