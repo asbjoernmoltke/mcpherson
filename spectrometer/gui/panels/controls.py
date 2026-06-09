@@ -33,7 +33,7 @@ class CameraPanel(QGroupBox):
         super().__init__("Camera")
         layout = QVBoxLayout(self)
 
-        self.conn = ConnectionBar("camera")
+        self.conn = ConnectionBar("camera", "Camera")
         self.connection_bars = [self.conn]
         layout.addWidget(self.conn)
 
@@ -177,7 +177,7 @@ class VacuumPanel(QGroupBox):
     def __init__(self):
         super().__init__("Vacuum")
         layout = QVBoxLayout(self)
-        self.conn = ConnectionBar("vacuum")
+        self.conn = ConnectionBar("vacuum", "Vacuum")
         self.connection_bars = [self.conn]
         layout.addWidget(self.conn)
         self._pressure = LabeledValue("Pressure")
@@ -199,7 +199,7 @@ class GratingPanel(QGroupBox):
     def __init__(self):
         super().__init__("Grating")
         layout = QVBoxLayout(self)
-        self.conn = ConnectionBar("grating")
+        self.conn = ConnectionBar("grating", "Grating")
         self.connection_bars = [self.conn]
         layout.addWidget(self.conn)
         self._position = LabeledValue("Position (steps)")
@@ -271,8 +271,8 @@ class ShutterLaserPanel(QGroupBox):
     def __init__(self):
         super().__init__("Shutter / Laser")
         layout = QVBoxLayout(self)
-        self.shutter_conn = ConnectionBar("shutter")
-        self.laser_conn = ConnectionBar("laser")
+        self.shutter_conn = ConnectionBar("shutter", "Shutter")
+        self.laser_conn = ConnectionBar("laser", "Laser")
         self.connection_bars = [self.shutter_conn, self.laser_conn]
         layout.addWidget(self.shutter_conn)
         layout.addWidget(self.laser_conn)

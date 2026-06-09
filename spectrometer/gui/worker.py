@@ -82,14 +82,14 @@ class HardwareWorker(QObject):
         s = self.system
         d = s.devices
         try:
-            conn = {
-                "camera": d.camera.is_connected,
-                "grating": d.grating.is_connected,
-                "shutter": d.shutter.is_connected,
-                "laser": d.laser.is_connected,
-                "vacuum": d.vacuum.is_connected,
-            }
-            snap = {"connections": conn, "estopped": s.safety.is_estopped,
+            keys = ("camera", "grating", "shutter", "laser", "vacuum")
+            conn = {k: getattr(d, k).is_connected for k in keys}
+            # A Dummy stand-in (e.g. the shutter, which has no real driver yet)
+            # is flagged 'simulated' so the GUI doesn't show it as real hardware.
+            simulated = {k: type(getattr(d, k)).__name__.startswith("Dummy")
+                         for k in keys}
+            snap = {"connections": conn, "simulated": simulated,
+                    "estopped": s.safety.is_estopped,
                     "busy": self._busy, "warming": self._warming}
 
             # vacuum first (the cooling interlock depends on it)

@@ -203,8 +203,10 @@ class MainWindow(QMainWindow):
     # --- handlers ------------------------------------------------------
     def _on_status(self, snapshot: dict) -> None:
         conns = snapshot.get("connections", {})
+        sims = snapshot.get("simulated", {})
         for bar in self._conn_bars:
-            bar.set_connected(conns.get(bar.device_key, False))
+            bar.set_connected(conns.get(bar.device_key, False),
+                              sims.get(bar.device_key, False))
         for p in self._panels:
             p.update(snapshot)
         if snapshot["estopped"]:

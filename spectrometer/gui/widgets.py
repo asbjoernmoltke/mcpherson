@@ -51,23 +51,28 @@ class _Dot(QWidget):
 
 
 class ConnectionBar(QWidget):
-    """Per-device connection row: a status dot + 'Connection: online/offline'
+    """Per-device connection row: a status dot + '<Device>: online/offline'
     + a Connect/Disconnect button. Carries its device key and emits it, so the
-    MainWindow can route the request to the right driver."""
+    MainWindow can route the request to the right driver. A 'simulated'
+    (amber) state flags a Dummy stand-in so it is never mistaken for real
+    hardware (e.g. the shutter, which has no concrete driver yet)."""
 
     connect_requested = pyqtSignal(str)
     disconnect_requested = pyqtSignal(str)
 
-    _COLORS = {True: QColor(40, 200, 80), False: QColor(120, 120, 120)}
+    _GREEN = QColor(40, 200, 80)
+    _AMBER = QColor(230, 180, 40)
+    _GREY = QColor(120, 120, 120)
 
-    def __init__(self, device_key: str):
+    def __init__(self, device_key: str, title: str | None = None):
         super().__init__()
         self.device_key = device_key
+        self._title = title or device_key.title()
         self._connected = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 2, 2, 2)
-        self._dot = _Dot(self._COLORS[False])
-        self._text = QLabel("Connection: offline")
+        self._dot = _Dot(self._GREY)
+        self._text = QLabel("%s: offline" % self._title)
         self._btn = QPushButton("Connect")
         self._btn.setMaximumWidth(110)
         layout.addWidget(self._dot)
@@ -82,10 +87,16 @@ class ConnectionBar(QWidget):
         else:
             self.connect_requested.emit(self.device_key)
 
-    def set_connected(self, connected: bool) -> None:
+    def set_connected(self, connected: bool, simulated: bool = False) -> None:
         self._connected = connected
-        self._dot.set_color(self._COLORS[connected])
-        self._text.setText("Connection: online" if connected else "Connection: offline")
+        if not connected:
+            color, state = self._GREY, "offline"
+        elif simulated:
+            color, state = self._AMBER, "simulated (no hardware)"
+        else:
+            color, state = self._GREEN, "online"
+        self._dot.set_color(color)
+        self._text.setText("%s: %s" % (self._title, state))
         self._btn.setText("Disconnect" if connected else "Connect")
 
 

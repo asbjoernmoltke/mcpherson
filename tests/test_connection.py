@@ -29,6 +29,9 @@ def test_disconnect_keeps_poll_alive_and_reconnect(qapp):
 
         w._poll_status()
         assert snaps[-1]["connections"]["grating"] is True
+        # In dummy mode every device is a simulated stand-in.
+        assert snaps[-1]["simulated"]["shutter"] is True
+        assert snaps[-1]["simulated"]["camera"] is True
 
         # Disconnect the grating: poll must still produce a snapshot, with the
         # grating section showing offline defaults rather than crashing.
