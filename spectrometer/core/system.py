@@ -35,12 +35,24 @@ class System:
     sync: SoftwareSync
     calibration: LinearCalibration
     engine: AcquisitionEngine
+    grating_name: str = "1200g/mm"
 
     def open_all(self) -> None:
         self.devices.open_all()
 
     def close_all(self) -> None:
         self.devices.close_all()
+
+    def set_grating(self, grating_name: str) -> None:
+        """Swap the active grating's calibration (declares which grating is
+        physically installed). The mechanical home is unchanged -- only the
+        position<->wavelength mapping -- so the homed state is preserved.
+        Updates every holder of the calibration in one place."""
+        cal = default_calibration(grating_name, n_pixels=self.calibration.n_pixels)
+        self.calibration = cal
+        self.grating.calibration = cal
+        self.engine.calibration = cal
+        self.grating_name = grating_name
 
 
 def build_system(dummy: bool = False, *, grating_port: str = "COM5",
@@ -79,7 +91,8 @@ def build_system(dummy: bool = False, *, grating_port: str = "COM5",
 
     return System(devices=devices, abort=abort, camera=camera, grating=grating,
                   shutter=shutter, laser=laser, vacuum=vacuum, safety=safety,
-                  sync=sync, calibration=calibration, engine=engine)
+                  sync=sync, calibration=calibration, engine=engine,
+                  grating_name=grating_name)
 
 
 def build_system_from_settings(settings, dummy: bool = False) -> System:

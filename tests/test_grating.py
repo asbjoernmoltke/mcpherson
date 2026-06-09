@@ -97,3 +97,25 @@ def test_unbounded_without_calibration():
     ctl.home()
     ctl.move_to_position(5000)                # no limit validation
     assert ctl.position == 5000
+
+
+# --- runtime grating selector -----------------------------------------
+def test_available_gratings():
+    from spectrometer.core.calibration import available_gratings
+    g = available_gratings()
+    assert set(g) == {"2400g/mm", "1200g/mm", "599.45g/mm"}
+
+
+def test_system_set_grating_swaps_calibration_everywhere():
+    from spectrometer.core.system import build_system
+    sys = build_system(dummy=True)
+    assert sys.grating_name == "1200g/mm"
+    cal0 = sys.calibration
+    sys.set_grating("2400g/mm")
+    assert sys.grating_name == "2400g/mm"
+    assert sys.calibration is not cal0
+    # every holder of the calibration is updated to the same new object
+    assert sys.grating.calibration is sys.calibration
+    assert sys.engine.calibration is sys.calibration
+    # 2400 g/mm has half the dispersion-per-step of 1200 (1.0 vs 2.0 nm/rev)
+    assert sys.calibration.nm_per_step == pytest.approx(cal0.nm_per_step / 2)

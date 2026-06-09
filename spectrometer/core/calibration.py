@@ -151,3 +151,8 @@ def mcpherson_234_302(grating: str = "1200g/mm", *, n_pixels: int = 1024,
 # Default calibration entry point (used by the system builder).
 def default_calibration(grating: str = "1200g/mm", n_pixels: int = 1024) -> LinearCalibration:
     return mcpherson_234_302(grating, n_pixels=n_pixels)
+
+
+def available_gratings() -> list[str]:
+    """Installed-grating choices for the 234/302 (for the GUI selector)."""
+    return list(MCPHERSON_234_302.keys())

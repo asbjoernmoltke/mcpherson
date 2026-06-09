@@ -25,6 +25,7 @@ class MainWindow(QMainWindow):
     _warmup = pyqtSignal()
     _home = pyqtSignal()
     _goto = pyqtSignal(float)
+    _grating = pyqtSignal(str)
     _single = pyqtSignal()
     _scan = pyqtSignal(float, float)
     _exposure = pyqtSignal(float)
@@ -77,9 +78,11 @@ class MainWindow(QMainWindow):
 
     # --- settings <-> UI ----------------------------------------------
     def _apply_settings(self) -> None:
+        from ..core.calibration import available_gratings
         s = self.settings
         self.camera_panel.apply_settings(s.cooling_setpoint_c, s.exposure_s)
         self.acq_panel.apply_settings(s.scan_wl_min, s.scan_wl_max, s.n_frames)
+        self.grating_panel.set_gratings(available_gratings(), s.grating_name)
 
     def _apply_capabilities(self) -> None:
         """Populate the camera config dropdowns from the (open) device."""
@@ -94,6 +97,7 @@ class MainWindow(QMainWindow):
         s.exposure_s = self.camera_panel.exposure_value()
         s.scan_wl_min, s.scan_wl_max = self.acq_panel.wl_range
         s.n_frames = self.acq_panel.n_frames
+        s.grating_name = self.grating_panel.current_grating()
 
     # --- layout --------------------------------------------------------
     def _build_layout(self) -> None:
@@ -126,6 +130,7 @@ class MainWindow(QMainWindow):
         self._warmup.connect(w.do_warmup)
         self._home.connect(w.do_home)
         self._goto.connect(w.do_goto_wavelength)
+        self._grating.connect(w.set_grating)
         self._single.connect(w.do_single)
         self._scan.connect(w.do_scan)
         self._exposure.connect(w.set_exposure)
@@ -155,6 +160,7 @@ class MainWindow(QMainWindow):
         self.grating_panel.home_requested.connect(self._home.emit)
         self.grating_panel.goto_requested.connect(self._goto.emit)
         self.grating_panel.stop_requested.connect(self._on_grating_stop)
+        self.grating_panel.grating_changed.connect(self._grating.emit)
         self.shutter_laser_panel.shutter_toggled.connect(self._shutter.emit)
         self.shutter_laser_panel.laser_toggled.connect(self._laser.emit)
         self.shutter_laser_panel.power_changed.connect(self._laser_power.emit)

@@ -187,6 +187,7 @@ class GratingPanel(QGroupBox):
     home_requested = pyqtSignal()
     goto_requested = pyqtSignal(float)
     stop_requested = pyqtSignal()
+    grating_changed = pyqtSignal(str)
 
     def __init__(self):
         super().__init__("Grating")
@@ -197,6 +198,15 @@ class GratingPanel(QGroupBox):
         layout.addWidget(self._position)
         layout.addWidget(self._status)
         layout.addWidget(self._homed)
+
+        # Installed-grating selector (declares which grating is in the turret;
+        # swaps the calibration). Populated by set_gratings().
+        grating_row = QHBoxLayout()
+        grating_row.addWidget(QLabel("Grating"))
+        self._grating = QComboBox()
+        grating_row.addWidget(self._grating, 1)
+        layout.addLayout(grating_row)
+        self._grating.currentTextChanged.connect(self.grating_changed.emit)
 
         grid = QGridLayout()
         self._wavelength = QDoubleSpinBox()
@@ -217,6 +227,19 @@ class GratingPanel(QGroupBox):
         self._goto_btn.clicked.connect(
             lambda: self.goto_requested.emit(self._wavelength.value()))
 
+    def set_gratings(self, names, current: str | None = None) -> None:
+        """Populate the selector (signals blocked so no spurious change)."""
+        self._grating.blockSignals(True)
+        self._grating.clear()
+        for n in names:
+            self._grating.addItem(n)
+        if current is not None and current in names:
+            self._grating.setCurrentText(current)
+        self._grating.blockSignals(False)
+
+    def current_grating(self) -> str:
+        return self._grating.currentText()
+
     def update(self, s: dict) -> None:
         self._position.set_value(f"{s['position']:,d}")
         self._status.set_value(s["grating"])
@@ -224,6 +247,8 @@ class GratingPanel(QGroupBox):
         self._homed.set_state("ok" if s.get("homed") else "warn")
         # Go-to-λ needs a homed reference; Home/Stop stay available.
         self._goto_btn.setEnabled(bool(s.get("homed")))
+        # Don't allow swapping the declared grating mid-acquisition.
+        self._grating.setEnabled(not s.get("busy", False))
 
 
 class ShutterLaserPanel(QGroupBox):

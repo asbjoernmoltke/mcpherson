@@ -155,6 +155,15 @@ class HardwareWorker(QObject):
         finally:
             self._set_busy(False)
 
+    @pyqtSlot(str)
+    def set_grating(self, grating_name: str) -> None:
+        """Declare the installed grating -> swap its calibration. Queued to the
+        worker thread, so it can't race a running scan (which blocks here)."""
+        try:
+            self.system.set_grating(grating_name)
+        except Exception as exc:
+            self.error.emit("Grating change failed: %s" % exc)
+
     @pyqtSlot(float)
     def do_goto_wavelength(self, wavelength_nm: float) -> None:
         self._set_busy(True)
