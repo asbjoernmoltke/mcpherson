@@ -13,8 +13,10 @@ vacuum all have real drivers; **shutter** is still dummy-only). See
   never require reshaping the writer.
 - [ ] **2. Calibration measurement routine** — step the grating, capture
   Hg/Ne/Ar lamp lines, fit `center_wavelength(steps)` + `nm/pixel`, save a
-  measured `LinearCalibration`. Resolves the 36000-vs-18000 steps/rev (2×),
-  the scan direction sign, and the absolute λ offset.
+  measured `LinearCalibration`. ◐ steps/rev (**36000**), direction (**+1**),
+  and 1200 g/mm dispersion (**5.56e-5 nm/step**) already confirmed via the
+  mechanical counter (2026-06-08); only the **absolute λ offset** + `nm/pixel`
+  still need a lamp line.
 - [ ] **3. Settings / state persistence** — `core/state.py` (planned Layer 4):
   remember last exposure, grating, setpoint, scan range, ports, save folder.
   Use `utilities/config.py` (currently unused).
@@ -42,11 +44,12 @@ vacuum all have real drivers; **shutter** is still dummy-only). See
 
 - [x] **7a.** Grating connection probe (`discover_mcpherson.py`) — **done**:
   COM5 confirmed (FTDI, fw v2.55), read-only identify + status.
-- [ ] **7b.** Bench-test: camera cooling lifecycle, **grating homing (◐ shipped
-  `home()` lands on the flag in ~12 s, verified 2026-06-08; the controller's
-  `F1000,0` fine-edge find is broken/removed pending the 789A-4 manual)**,
-  laser power calibration + RUN state (`origami_power_test.py`), vacuum gauge
-  read (`discover_edwards.py`); confirm COM ports + active grating.
+- [ ] **7b.** Bench-test: camera cooling lifecycle, **grating homing (◐ coarse
+  home verified on hw 2026-06-08; `F1000,0` fine-edge find works (~94 s @ 72k
+  settle) and is now re-instated in `home()` with a trimmed -10000 settle —
+  this trimmed path is NOT yet re-verified on hw)**, laser power calibration +
+  RUN state (`origami_power_test.py`), vacuum gauge read
+  (`discover_edwards.py`); confirm COM ports + active grating.
 - [ ] **7c.** Lamp wavelength calibration (see #2).
 
 ## Shutter (excluded for now)

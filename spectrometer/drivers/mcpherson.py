@@ -48,6 +48,8 @@ class MP_789A_4(GratingDriver):
     ST_UPPER = 64
     ST_LOWER = 128
     HOME_SWEEP_TIMEOUT = 300.0   # s; bounded by the limit switches in any case
+    HOME_SETTLE_STEPS = 10000    # settle into the flag before the fine edge-find
+    FINE_HOME_TIMEOUT = 90.0     # F1000,0 scans ~1 s per 1000 settle steps; margin
 
     @staticmethod
     def _parse_status(reply) -> int:
@@ -215,18 +217,32 @@ class MP_789A_4(GratingDriver):
                 log.info('On the home flag; backing off (+) until clear.')
                 self._sweep_to_home_state(b'M+23000', want_on_flag=False)
 
-            # Approach the flag from above (home is the '-' direction). The
-            # sweep stops on the flag's leading edge -- this is the home
-            # reference. (The controller's F1000,0 high-accuracy Find-Home was
-            # tried on hw 2026-06-08 but drove OFF the flag and never converged
-            # -- its args/direction need the 789A-4 manual, so it is left out;
-            # the consistent down-approach edge is repeatable enough until lamp
-            # calibration. TODO: verified fine-edge homing.)
+            # Approach the flag from above (home is the '-' direction); the
+            # coarse sweep stops on the flag's leading edge.
             log.info('Sweeping - to the home flag.')
             self._sweep_to_home_state(b'M-23000', want_on_flag=True)
+
+            # Fine-edge homing. Settle a SHORT way into the flag, then the
+            # controller's high-accuracy Find-Home (F1000,0) creeps to the
+            # precise edge. Verified on hw 2026-06-08: F1000,0 works but scans
+            # at 1000 steps/s (~1 s per 1000 settle steps), so the settle is
+            # kept small (the original -72000 took ~94 s). A24 switches the home
+            # bit to the narrow high-accuracy zone (reads 0 just off it), so we
+            # wait on the moving bit, not the home bit. NOTE: this fine path is
+            # not yet re-verified on hardware after trimming the settle.
+            log.info('Fine edge-find: settle -%d then F1000,0.'
+                     % self.HOME_SETTLE_STEPS)
+            self.s.xfer([b'-%d' % self.HOME_SETTLE_STEPS])
+            self._wait_stopped(timeout=30.0)
+            self.s.xfer([b'A24'])            # high-accuracy circuit
+            self.s.xfer([b'F1000,0'])        # find home edge @ 1000 steps/s
+            time.sleep(1.0)                  # let F start before we poll (it
+            #                                  ramps within ~0.5 s) so we don't
+            #                                  read a premature 'stopped'.
+            self._wait_stopped(timeout=self.FINE_HOME_TIMEOUT)
             self.s.xfer([b'A0'])             # disable home circuit
             self._position = 0
-            log.info('Home complete (coarse, on flag); software position 0.')
+            log.info('Home complete (fine edge); software position 0.')
             return True
         finally:
             self._moving = False

@@ -130,14 +130,16 @@ by the homing −108000="3 rev").
 | ☑ | 🔧 **Monochromator + drive** | Calibration basis | 234/302, 200 mm f/4.5; 36000 steps/rev | `calibration.py` `MCPHERSON_234_302` |
 | ☑ | 🔧 **Gratings + home λ** | Dispersion + reference | 2400 (279.70), 1200 (279.70), 599.45 (279.82) | `MCPHERSON_234_302` |
 | ☑ | 🔧 **Grating COM port** | Serial connection | **COM5 confirmed** (FTDI `0403:6001`, fw v2.55) | `build_devices(grating_port=...)` |
-| ☐ | 🔧 **Active grating** | Which one is installed now | `1200g/mm` default | `build_system(grating_name=...)` |
-| ☐ | ⚠️ **steps/rev = 36000 vs 18000** | 2× factor on λ — needs a lamp line | `STEPS_PER_MOTOR_REV=36000` | `calibration.py` |
-| ◐ | ⚠️ **Scan direction sign** | Does +steps raise or lower λ | **home is mechanical `−` dir** (verified); nm sign still needs lamp | `calibration.py` `DIRECTION=+1` |
+| ☑ | 🔧 **Active grating** | Which one is installed now | **1200 g/mm confirmed** (measured 2.0 nm/rev) | `build_system(grating_name=...)` |
+| ☑ | ⚠️ **steps/rev = 36000 vs 18000** | 2× factor on λ | **36000 confirmed**: +18000 steps = half a knob turn | `calibration.py` `STEPS_PER_MOTOR_REV=36000` |
+| ☑ | ⚠️ **Scan direction sign** | Does +steps raise or lower λ | **+1 confirmed**: +steps raised the counter | `calibration.py` `DIRECTION=+1` |
 | ☐ | ⚠️ **Backlash steps** | Repeatable positioning | `0` (homing backs into the flag) | `GratingController.backlash` |
 
 **Bring-up 2026-06-08 (verified):** identify + read-only status (`tests/discover_mcpherson.py`); bounded jog ±20000 (`jog_mcpherson.py`); coarse home + off-and-back sweep (`home_mcpherson.py`, `verify_home_mcpherson.py`); **the shipped `MP_789A_4.home()` now lands on the flag in ~12 s and confirms ON FLAG** (`run_driver_home.py`). **`]` home bit (32) only shows after `A8`** — the read-only probe can falsely read "off home". Home is the `−` direction. `home()`/status handling rewritten to integer bit-parsing (substring checks misfired: '2' in '32', missed 66=upper+moving); watchdog thread now a joinable daemon.
 
-**Still TODO (hw):** the controller's **`F1000,0` high-accuracy fine-edge find drove OFF the flag and never converged** — needs the 789A-4 manual (args/direction); it's removed from `home()` for now (coarse edge is the reference). Lamp calibration for steps/rev (36000 vs 18000) + nm direction + λ offset.
+**Calibration confirmed via the mechanical counter (no lamp needed):** +18000 steps = **half a knob turn ⇒ 36000 steps/rev**; counter +1.0 nm / 18000 steps ⇒ **nm/step 5.56e-5** (= 1200 g/mm spec), **+steps raises λ ⇒ DIRECTION=+1**. All match the code — no calibration changes.
+
+**Still TODO (hw):** the controller's **`F1000,0` fine-edge find actually WORKS** (earlier "broken" was a too-short 60 s timeout: it needs ~94 s with a 72000 settle; refines home 2781→2793). Re-instate it in `home()` with a trimmed settle (`-10000`) + adequate timeout. Absolute λ offset still wants a lamp-line check (counter ~279.3 at fine home vs `wl0=279.70`).
 
 ---
 
@@ -155,8 +157,8 @@ grating (replacing the placeholders): `nm_per_step = nm_per_motor_rev / 36000`,
 
 | ✓ | Item | Why | Status |
 |---|------|-----|--------|
-| ☑ | 🔧 **Per-grating dispersion + nm/step** | Wavelength axis | derived from spec |
-| ☐ | ⚠️ **Lamp verification** | Confirm steps/rev (2×) + direction + absolute λ offset | measure Hg/Ne/Ar lines, fit, save |
+| ☑ | 🔧 **Per-grating dispersion + nm/step** | Wavelength axis | spec + **counter-confirmed** (1200: 5.56e-5 nm/step) |
+| ◐ | ⚠️ **Lamp verification** | steps/rev (36000) ☑ + direction (+1) ☑ via counter; **absolute λ offset** still open | measure Hg/Ne/Ar line, fit offset |
 | ☐ | 📋 **Persisted measured calibration** | Use a fitted file over the nominal | `LinearCalibration.to_file/from_file` |
 
 ---
