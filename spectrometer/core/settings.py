@@ -31,8 +31,10 @@ class Settings:
     laser_interface: str = "cli"        # "cli" | "interbus"
     vacuum_port: str = "COM7"
     vacuum_gauge: int = 1
-    vacuum_units: str = "mbar"
-    cooling_threshold: float = 1.0e-4   # safe pressure for cooling
+    vacuum_units: str = "Pa"            # Edwards TIC serial reports Pa (confirmed)
+    # Safe-to-cool pressure in the gauge's unit (Pa). PLACEHOLDER -- confirm the
+    # real spec (1e-2 Pa = 1e-4 mbar is a ballpark "ok to cool").
+    cooling_threshold: float = 1.0e-2
 
     # --- instrument ----------------------------------------------------
     grating_name: str = "1200g/mm"

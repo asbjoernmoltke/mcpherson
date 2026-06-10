@@ -60,7 +60,7 @@ def build_system(dummy: bool = False, *, grating_port: str = "COM5",
                  grating_name: str = "1200g/mm",
                  laser_port: str | None = None, laser_interface: str = "cli",
                  vacuum_port: str = "COM7", vacuum_gauge: int = 1,
-                 vacuum_units: str = "mbar") -> System:
+                 vacuum_units: str = "Pa") -> System:
     devices = build_devices(dummy=dummy, grating_port=grating_port,
                             laser_port=laser_port, laser_interface=laser_interface,
                             vacuum_port=vacuum_port, vacuum_gauge=vacuum_gauge,

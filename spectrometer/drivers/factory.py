@@ -41,7 +41,7 @@ def build_devices(dummy: bool = False, *, grating_port: str = "COM5",
                   laser_port: str | None = None,
                   laser_interface: str = "cli",
                   vacuum_port: str = "COM7", vacuum_gauge: int = 1,
-                  vacuum_units: str = "mbar") -> DeviceBundle:
+                  vacuum_units: str = "Pa") -> DeviceBundle:
     """Construct all drivers. ``dummy=True`` returns an all-simulated bundle.
 
     ``laser_port`` is the Origami's COM port. ``laser_interface`` selects how

@@ -8,14 +8,15 @@ Ordered roughly by how ready each subsystem is to finish.
 
 ---
 
-## Vacuum — gauge reads OK in the GUI; lock the config values
-Run `python tests/discover_edwards.py [COM]` and set these from the replies:
+## Vacuum — TIC200 talking; mostly confirmed (2026-06-10)
+Confirmed via `discover_edwards.py` / `discover_edwards_pumps.py` on **COM7**:
+controller = **Edwards TIC200**; **gauge slot 1 / object 913** (914/915 = no
+gauge); serial **unit = Pa** (1.0000e+05 Pa = 750 Torr = atm; the panel unit is
+independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
+`vacuum_units="Pa"`.
 
-- [ ] ⚠️ Confirm the **wide-range gauge slot** (now `gauge=1` → object 913) — `build_devices(vacuum_gauge=)`
-- [ ] ⚠️ Confirm **gauge units** (mbar/Torr/Pa) so threshold + display match — `build_devices(vacuum_units=)`
-- [ ] ⚠️ Set the **safe cooling threshold** (now `1e-4` placeholder) — `build_system(cooling_threshold=)`
-- [ ] 🔧 Confirm the **TIC COM port** (now `COM7`) and the **value reply format** — `EdwardsTIC`
-- [ ] 📋 Confirm **pump object IDs** (turbo 904 / backing 910) so the read-only pump status shows real values — `EdwardsTIC(turbo_object=, backing_object=)`
+- [ ] ⚠️ Set the **safe cooling threshold** — still TBD; now a `1e-2` **Pa** placeholder (= 1e-4 mbar) — `cooling_threshold`
+- [◐] 📋 **Pump objects** found: turbo (nEXT85D) at **904** state / **905** speed / **906** power; backing (nXDS) at **910**. All read 0 now (pumps OFF at atmosphere). **Verify by watching obj 905 ramp 0→~100 % when you pump down**, then refine the GUI pump-status formatting (currently shows raw `0;0;0`).
 - [ ] 📋 Decide the **loss-of-vacuum** alarm behaviour (warn-only) — `SafetyManager.check_vacuum_while_cold`
 
 ## Camera — offline-complete; staged bench bring-up pending

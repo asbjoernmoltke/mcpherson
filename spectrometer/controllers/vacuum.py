@@ -12,7 +12,7 @@ from .base import Controller
 
 # Default safe threshold for permitting cooling. The real value + the gauge's
 # units are an open item (see plan); make it explicit and configurable.
-DEFAULT_COOLING_THRESHOLD = 1.0e-4  # in the gauge's native units
+DEFAULT_COOLING_THRESHOLD = 1.0e-2  # Pa (gauge's native unit); PLACEHOLDER -- confirm spec
 
 
 class VacuumController(Controller):

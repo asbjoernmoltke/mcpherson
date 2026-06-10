@@ -54,8 +54,8 @@ max pump power. Then bench-verify enable/disable with the beam dumped.
 
 ## 2. Vacuum gauge (read-only)
 
-Hardware: **Edwards TIC** controller + **wide-range gauge** (sensor), with an
-**nXDS15i** backing pump and an **EXT (EXT406PM) turbo** pump. Per the locked
+Hardware: **Edwards TIC200** controller + **wide-range gauge** (sensor, object
+913), with an **nXDS** backing pump and a **nEXT85D** turbo pump. Per the locked
 decision the software is READ-ONLY (reads the wide-range gauge to gate cooling;
 never commands the pumps). Driver: `EdwardsTIC` (`vacuum_edwards.py`), wired into
 the real factory path; `DummyVacuum` for offline. `VacuumController` is now
@@ -66,12 +66,12 @@ gauge 1/2/3). Confirm the real format/slot/units with `tests/discover_edwards.py
 
 | ✓ | Item | Why | Current value | Where to set |
 |---|------|-----|---------------|--------------|
-| ☐ | ⚠️ **Which gauge slot is the wide-range gauge** | Read the right sensor | `gauge=1` (object 913) | `build_devices(vacuum_gauge=...)` |
-| ☐ | ⚠️ **Gauge units** (mbar/Torr/Pa) | Threshold + display must match | `"mbar"` | `build_devices(vacuum_units=...)` |
-| ☐ | ⚠️ **Safe pressure threshold for cooling** | Camera mustn't cool above this | `1.0e-4` (arbitrary) | `build_system(cooling_threshold=...)` |
-| ☐ | 🔧 **TIC COM port** | Serial connection | `COM7` (guess) | `build_devices(vacuum_port=...)` |
-| ☐ | 🔧 **Value reply format** (`<p>;<unit>;<state>`?) | Correct parse | assumed `;`-separated, field0=pressure | `EdwardsTIC.parse_value_reply` |
-| ◐ | 📋 **Pump object IDs** (turbo/backing) | Read-only status now shown in the Vacuum panel; CONFIRM the IDs so the values are real | turbo=904, backing=910 (guess) | `EdwardsTIC(turbo_object=, backing_object=)` |
+| ☑ | ⚠️ **Which gauge slot is the wide-range gauge** | Read the right sensor | **object 913 / slot 1 confirmed** (914/915 = no gauge) | `build_devices(vacuum_gauge=1)` |
+| ☑ | ⚠️ **Gauge units** | Threshold + display must match | **serial = Pa confirmed** (1e5 Pa = 750 Torr; panel unit independent) | `vacuum_units="Pa"` |
+| ☐ | ⚠️ **Safe pressure threshold for cooling** | Camera mustn't cool above this | **TBD** — `1e-2` Pa placeholder (= 1e-4 mbar) | `build_system(cooling_threshold=...)` |
+| ☑ | 🔧 **TIC COM port** | Serial connection | **COM7 confirmed** (FTDI `0403:6015`); controller = TIC200 | `build_devices(vacuum_port=...)` |
+| ☑ | 🔧 **Value reply format** | Correct parse | **`<p>;<unit>;<state>` confirmed**, field0=pressure | `EdwardsTIC.parse_value_reply` |
+| ◐ | 📋 **Pump objects** (turbo nEXT85D / backing nXDS) | Read-only status display | turbo 904(state)/905(speed)/906(power), backing 910 — respond, OFF at atm; verify obj 905 ramps when pumping | `EdwardsTIC(turbo_object=, backing_object=)` |
 | ☐ | 📋 **Loss-of-vacuum response** | Warn-only alarm | `SafetyManager.check_vacuum_while_cold` | — |
 
 **Action:** run `python tests/discover_edwards.py [COM]` → identify the
