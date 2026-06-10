@@ -54,9 +54,21 @@ class AndorCamera(CameraDriver):
         from pylablib.devices.Andor import AndorSDK2Camera
 
         pll.par["devices/dlls/andor_sdk2"] = self._sdk2_path
-        # NOTE: do not force a warm setpoint / fan-off here. Cooling is driven
-        # deliberately by CameraController after the vacuum interlock passes.
         self._cam = AndorSDK2Camera(idx=self._idx)
+        # SAFETY: pylablib/the SDK comes up with the cooler ENABLED at its last
+        # setpoint (observed on hw 2026-06-10: cooler on, -35 C, on every open).
+        # Cooling must only happen via the vacuum-gated CameraController.cooldown,
+        # so if the sensor is WARM we force the cooler off on connect -- otherwise
+        # merely opening the camera silently cools a warm sensor with no vacuum.
+        # A genuinely COLD camera (<5 C) is left untouched so we never abruptly
+        # warm it; the controller handles the cold-reconnect / vacuum-lost case.
+        try:
+            if self._cam.is_cooler_on() and float(self._cam.get_temperature()) > 5.0:
+                self._cam.set_cooler(False)
+                log.warn("AndorCamera: cooler was ON at open with a warm sensor "
+                         "-> forced OFF (cooling is vacuum-gated via cooldown()).")
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            log.error("AndorCamera: could not enforce cooler-off on open: %s" % exc)
         log.info("AndorCamera opened.")
 
     def close(self) -> None:
