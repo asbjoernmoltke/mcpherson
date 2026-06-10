@@ -29,9 +29,9 @@ camera is powered; **C–E require the chamber under vacuum.**
 - [ ] ⚠️ **Stage E** — fan policy: air-cooled `'full'` vs water `'off'` — `CameraController.cooling_fan_mode`
 - [ ] 🔧 Confirm **internal-shutter / trigger-mode** enum — `CameraController.configure`
 
-## Grating — working; two items left
+## Grating — working; one item left
 - [x] ⚠️ Trimmed **`F1000,0` fine-home** verified on hw 2026-06-10 — lands on counter **2793** (F self-stops at home; home light off). ~47 s from far, less when near.
-- [ ] ⚠️ Measure **backlash** for repeatable positioning (now `0`) — `GratingController.backlash`
+- [x] ⚠️ **Backlash** measured 2026-06-10: same counter (2904.7) approaching a position from + and from − ⇒ backlash **≲ 900 steps ≈ ½ pixel**, negligible. **Kept `backlash = 0`**; set ~1000 only if a future lamp/camera check shows it matters.
 - [ ] ⚠️ **Absolute λ offset** vs a lamp line — see Calibration (relative dispersion, steps/rev, direction already confirmed via the mechanical counter)
 
 ## Laser — controls coded; bench-verify + power calibration

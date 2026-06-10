@@ -147,7 +147,7 @@ by the homing −108000="3 rev").
 | ☑ | 🔧 **Active grating** | Which one is installed now | **1200 g/mm confirmed** (measured 2.0 nm/rev) | `build_system(grating_name=...)` |
 | ☑ | ⚠️ **steps/rev = 36000 vs 18000** | 2× factor on λ | **36000 confirmed**: +18000 steps = half a knob turn | `calibration.py` `STEPS_PER_MOTOR_REV=36000` |
 | ☑ | ⚠️ **Scan direction sign** | Does +steps raise or lower λ | **+1 confirmed**: +steps raised the counter | `calibration.py` `DIRECTION=+1` |
-| ☐ | ⚠️ **Backlash steps** | Repeatable positioning | `0` (homing backs into the flag) | `GratingController.backlash` |
+| ☑ | ⚠️ **Backlash steps** | Repeatable positioning | **measured ≲900 steps ≈ ½ pixel (2026-06-10) → negligible; kept `0`** | `GratingController.backlash` |
 
 **Bring-up 2026-06-08 (verified):** identify + read-only status (`tests/discover_mcpherson.py`); bounded jog ±20000 (`jog_mcpherson.py`); coarse home + off-and-back sweep (`home_mcpherson.py`, `verify_home_mcpherson.py`); **the shipped `MP_789A_4.home()` now lands on the flag in ~12 s and confirms ON FLAG** (`run_driver_home.py`). **`]` home bit (32) only shows after `A8`** — the read-only probe can falsely read "off home". Home is the `−` direction. `home()`/status handling rewritten to integer bit-parsing (substring checks misfired: '2' in '32', missed 66=upper+moving); watchdog thread now a joinable daemon.
 
