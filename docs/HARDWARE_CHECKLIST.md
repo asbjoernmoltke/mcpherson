@@ -71,7 +71,7 @@ gauge 1/2/3). Confirm the real format/slot/units with `tests/discover_edwards.py
 | ☐ | ⚠️ **Safe pressure threshold for cooling** | Camera mustn't cool above this | **TBD** — `1e-2` Pa placeholder (= 1e-4 mbar) | `build_system(cooling_threshold=...)` |
 | ☑ | 🔧 **TIC COM port** | Serial connection | **COM7 confirmed** (FTDI `0403:6015`); controller = TIC200 | `build_devices(vacuum_port=...)` |
 | ☑ | 🔧 **Value reply format** | Correct parse | **`<p>;<unit>;<state>` confirmed**, field0=pressure | `EdwardsTIC.parse_value_reply` |
-| ◐ | 📋 **Pump objects** (turbo nEXT85D / backing nXDS) | Read-only status display | turbo 904(state)/905(speed)/906(power), backing 910 — respond, OFF at atm; verify obj 905 ramps when pumping | `EdwardsTIC(turbo_object=, backing_object=)` |
+| ☑ | 📋 **Pump objects** (turbo nEXT85D / backing nXDS) | Read-only status display | **decoded + displayed** (2026-06-10 pump-down): turbo 904 state/905 speed, backing 910; GUI shows "Running, NN%" | `EdwardsTIC` |
 | ☐ | 📋 **Loss-of-vacuum response** | Warn-only alarm | `SafetyManager.check_vacuum_while_cold` | — |
 
 **Action:** run `python tests/discover_edwards.py [COM]` → identify the

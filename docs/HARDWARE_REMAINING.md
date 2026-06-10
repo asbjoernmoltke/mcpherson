@@ -15,8 +15,8 @@ gauge); serial **unit = Pa** (1.0000e+05 Pa = 750 Torr = atm; the panel unit is
 independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
 `vacuum_units="Pa"`.
 
-- [ ] ⚠️ Set the **safe cooling threshold** — still TBD; now a `1e-2` **Pa** placeholder (= 1e-4 mbar) — `cooling_threshold`
-- [◐] 📋 **Pump objects** found: turbo (nEXT85D) at **904** state / **905** speed / **906** power; backing (nXDS) at **910**. All read 0 now (pumps OFF at atmosphere). **Verify by watching obj 905 ramp 0→~100 % when you pump down**, then refine the GUI pump-status formatting (currently shows raw `0;0;0`).
+- [ ] ⚠️ Set the **safe cooling threshold** — still TBD (now a `1e-2` **Pa** placeholder). Pump-down 2026-06-10 reached ~27 Pa with the turbo still spinning up; pick the threshold once we know the base pressure — `cooling_threshold`
+- [x] 📋 **Pump status decoded + displayed** — turbo (nEXT85D) 904 state / 905 speed / 906 power, backing (nXDS) 910. State codes: turbo 0=stopped/5=starting/4=running, backing 0/4. GUI shows e.g. "Running, 78%".
 - [ ] 📋 Decide the **loss-of-vacuum** alarm behaviour (warn-only) — `SafetyManager.check_vacuum_while_cold`
 
 ## Camera — Stages A+B done (2026-06-10); C–E need vacuum
