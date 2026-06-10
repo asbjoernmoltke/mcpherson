@@ -29,21 +29,21 @@ def main() -> int:
 
     drv = MP_789A_4(PORT)
     try:
+        drv.open()      # connection is deferred to open() (not the constructor)
         print("Connected. Pre-home status ] = %d, position = %d."
               % (drv._limit_status(), drv.get_position()))
         t0 = time.monotonic()
         ok = drv.home()
         dt = time.monotonic() - t0
-        print("\nhome() returned %s in %.1fs." % (ok, dt))
-        # Confirm we're actually ON the flag: re-enable the home circuit (A0
-        # left it disabled, which hides the home bit) and read the status.
-        drv.s.xfer([b"A8"])
-        on_flag = drv._limit_status()
-        drv.s.xfer([b"A0"])
-        print("Post-home: position = %d; home bit (with A8) = %d -> %s."
-              % (drv.get_position(), on_flag,
-                 "ON FLAG" if on_flag & drv.ST_HOME else "NOT on flag!"))
-        return 0 if (ok and on_flag & drv.ST_HOME) else 1
+        print("\nhome() returned %s in %.1fs; position reset to %d."
+              % (ok, dt, drv.get_position()))
+        # NOTE: don't check the wide-flag bit here. The fine-find (F1000,0 under
+        # A24) lands on the NARROW high-accuracy edge -- the home light goes off
+        # and the wide A8 flag reads 0. The controller's F stops itself at home;
+        # home() waits for that stop. Confirm on the bench instead:
+        print("CONFIRM at the controller: mechanical counter ~2793 and the "
+              "home light is OFF (light is on only while searching).")
+        return 0 if ok else 1
     except Exception as exc:
         print("\nhome() raised: %s" % exc)
         drv.stop()

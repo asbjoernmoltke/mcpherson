@@ -29,8 +29,8 @@ camera is powered; **C–E require the chamber under vacuum.**
 - [ ] ⚠️ **Stage E** — fan policy: air-cooled `'full'` vs water `'off'` — `CameraController.cooling_fan_mode`
 - [ ] 🔧 Confirm **internal-shutter / trigger-mode** enum — `CameraController.configure`
 
-## Grating — working; three items left
-- [ ] ⚠️ Verify the trimmed **`F1000,0` fine-home** on hardware (`python tests/run_driver_home.py COM5` → should land on counter **2793** in ~15 s). Re-instated in code, **not yet run on hw**.
+## Grating — working; two items left
+- [x] ⚠️ Trimmed **`F1000,0` fine-home** verified on hw 2026-06-10 — lands on counter **2793** (F self-stops at home; home light off). ~47 s from far, less when near.
 - [ ] ⚠️ Measure **backlash** for repeatable positioning (now `0`) — `GratingController.backlash`
 - [ ] ⚠️ **Absolute λ offset** vs a lamp line — see Calibration (relative dispersion, steps/rev, direction already confirmed via the mechanical counter)
 
