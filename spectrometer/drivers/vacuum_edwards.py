@@ -31,12 +31,19 @@ from .base import VacuumDriver
 # Gauge slot (1/2/3) -> TIC object id.
 GAUGE_OBJECTS = {1: 913, 2: 914, 3: 915}
 
+# Pump 'state' codes (object value field 0). Observed on hw 2026-06-10 during a
+# pump-down: turbo 0=stopped, 5=starting, 4=running (speed % ramps within
+# 'running'); backing 0=stopped, 4=running. Unknown codes shown as "state N".
+TURBO_STATE_NAMES = {0: "Stopped", 4: "Running", 5: "Starting"}
+BACKING_STATE_NAMES = {0: "Stopped", 4: "Running"}
+
 
 class EdwardsTIC(VacuumDriver):
     def __init__(self, port: str = "COM7", *, gauge: int = 1,
-                 units: str = "mbar", baudrate: int = 9600,
+                 units: str = "Pa", baudrate: int = 9600,
                  terminator: str = "\r", timeout: float = 0.6,
-                 turbo_object: int = 904, backing_object: int = 910):
+                 turbo_object: int = 904, turbo_speed_object: int = 905,
+                 backing_object: int = 910):
         self.port = port
         # Accept a slot (1/2/3) or a raw object id (>=900).
         self.gauge_object = GAUGE_OBJECTS.get(gauge, gauge)
@@ -45,6 +52,7 @@ class EdwardsTIC(VacuumDriver):
         self.terminator = terminator
         self.timeout = timeout
         self.turbo_object = turbo_object
+        self.turbo_speed_object = turbo_speed_object  # 905: turbo speed (%)
         self.backing_object = backing_object
         self._ser: Optional[serial.Serial] = None
         self._lock = threading.Lock()
@@ -128,16 +136,27 @@ class EdwardsTIC(VacuumDriver):
         except Exception:
             return None
 
-    def read_turbo_state(self) -> Optional[str]:
+    def _state_code(self, obj: int) -> Optional[int]:
         try:
-            return ";".join(self.parse_value_reply(
-                self._comm("?V%d" % self.turbo_object)))
+            return int(float(self.parse_value_reply(self._comm("?V%d" % obj))[0]))
         except Exception:
             return None
 
-    def read_backing_state(self) -> Optional[str]:
-        try:
-            return ";".join(self.parse_value_reply(
-                self._comm("?V%d" % self.backing_object)))
-        except Exception:
+    def read_turbo_state(self) -> Optional[str]:
+        """Turbo status for display, e.g. 'Running, 76%' / 'Starting' / 'Stopped'."""
+        st = self._state_code(self.turbo_object)
+        if st is None:
             return None
+        name = TURBO_STATE_NAMES.get(st, "state %d" % st)
+        try:
+            speed = float(self.parse_value_reply(
+                self._comm("?V%d" % self.turbo_speed_object))[0])
+            return "%s, %.0f%%" % (name, speed)
+        except Exception:
+            return name
+
+    def read_backing_state(self) -> Optional[str]:
+        st = self._state_code(self.backing_object)
+        if st is None:
+            return None
+        return BACKING_STATE_NAMES.get(st, "state %d" % st)
