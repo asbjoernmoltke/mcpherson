@@ -33,7 +33,7 @@ camera is powered; **C–E require the chamber under vacuum.**
 ## Grating — working; one item left
 - [x] ⚠️ Trimmed **`F1000,0` fine-home** verified on hw 2026-06-10 — lands on counter **2793** (F self-stops at home; home light off). ~47 s from far, less when near.
 - [x] ⚠️ **Backlash** measured 2026-06-10: same counter (2904.7) approaching a position from + and from − ⇒ backlash **≲ 900 steps ≈ ½ pixel**, negligible. **Kept `backlash = 0`**; set ~1000 only if a future lamp/camera check shows it matters.
-- [ ] ⚠️ **Absolute λ offset** vs a lamp line — see Calibration (relative dispersion, steps/rev, direction already confirmed via the mechanical counter)
+- [ ] ⚠️ **Grating identity + true dispersion + absolute λ** — all need a lamp line (or the grating's physical label). The counter test only confirmed the drive (36000 steps/rev) + mechanism direction, NOT the grating; installed is **believed 599.45 g/mm**. NB: if 599.45, the mechanical counter reads ~½ true λ (it's geared to a 1200 reference), so don't trust the counter as the absolute reference for this grating.
 
 ## Laser — controls coded; bench-verify + power calibration
 - [ ] ⚠️ Bench-verify **enable/disable** (the E-stop path) with the beam dumped
