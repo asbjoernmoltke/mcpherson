@@ -19,15 +19,12 @@ independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
 - [◐] 📋 **Pump objects** found: turbo (nEXT85D) at **904** state / **905** speed / **906** power; backing (nXDS) at **910**. All read 0 now (pumps OFF at atmosphere). **Verify by watching obj 905 ramp 0→~100 % when you pump down**, then refine the GUI pump-status formatting (currently shows raw `0;0;0`).
 - [ ] 📋 Decide the **loss-of-vacuum** alarm behaviour (warn-only) — `SafetyManager.check_vacuum_while_cold`
 
-## Camera — offline-complete; staged bench bring-up pending
-Needs `pylablib` + Andor SDK2 (Driver Pack 2) on the camera PC. A–B anytime the
-camera is powered; **C–E require the chamber under vacuum.**
-
-- [ ] **Stage A** — identify (SAFE, no cooling): `python tests/discover_andor.py`; verify the **A-D-rate / pre-amp / EM amp-mode mapping** against the real device
-- [ ] **Stage B** — uncooled single + live frames (frame shape / bit-depth / saturation guard)
-- [ ] ⚠️ **Stage C** — cooling lifecycle UNDER VACUUM: `cooldown` → progress → stable → cooled frame → `safe_shutdown` (controlled warm-up then cooler off)
-- [ ] ⚠️ **Stage D** — interlock proof: `cooldown` is REFUSED above `cooling_threshold`
-- [ ] ⚠️ **Stage E** — fan policy: air-cooled `'full'` vs water `'off'` — `CameraController.cooling_fan_mode`
+## Camera — Stages A+B done (2026-06-10); C–E need vacuum
+- [x] **Stage A** — identify: DU920P_BEN s/n 26178, detector 1024×255, settable range **-50..+26 C** (fixed code: MIN=-50/DEFAULT=-45), amp-mode mapping CONFIRMED (3/1/0.05 MHz × 1/2/4×, conventional, no EM). Found+fixed: **camera comes up cooler-ON every open → `open()` now force-disables it when warm**.
+- [x] **Stage B** — uncooled grab `(255,1024)` uint16, 1-D length 1024, live streaming, saturation guard — all OK; dark ~300 counts at 22 C/10 ms (`tests/acquire_andor.py`).
+- [ ] ⚠️ **Stage C** — cooling lifecycle UNDER VACUUM: `cooldown` → progress → stable → cooled frame → `safe_shutdown`. (Setpoint range is -50..-20 now; coldest reachable -50 C.)
+- [ ] ⚠️ **Stage D** — interlock proof: `cooldown` REFUSED above `cooling_threshold`
+- [ ] ⚠️ **Stage E** — fan policy: air-cooled `'full'` vs water `'off'` — `CameraController.cooling_fan_mode` (came up `'off'`)
 - [ ] 🔧 Confirm **internal-shutter / trigger-mode** enum — `CameraController.configure`
 
 ## Grating — working; one item left
