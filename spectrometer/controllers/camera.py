@@ -29,10 +29,13 @@ from ..core.exceptions import InterlockError
 # at/around this count, so this is the practical per-pixel saturation guard.
 SATURATION_LEVEL = 65000
 
-# Andor Newton DU920P_BEN (s/n 26178): the SDK reports a settable temperature
-# range of -50..+26 C on this rig (air-cooled), so -50 C is the coldest it can
-# reach -- NOT the -100/-80 the datasheet implies (that needs water cooling).
-# Confirmed on hw 2026-06-10 (tests/discover_andor.py).
+# Andor Newton DU920P_BEN (s/n 26178). The SDK reported a settable range of
+# -50..+26 C on 2026-06-10 -- BUT that is SWITCH-DEPENDENT: the physical cooling
+# unit has a 1/2 selector, and these limits were read with it on position 1.
+# Position 2 (deep/high-power cooling, likely water-assisted) is expected to
+# extend the range toward -100 C. TODO (revisit with vacuum): query the range
+# dynamically from the camera (get_temperature_range) instead of hardcoding, so
+# it follows the switch. The values below are the conservative position-1 case.
 MIN_SETPOINT_C = -50.0
 MAX_SETPOINT_C = -20.0
 DEFAULT_SETPOINT_C = -45.0

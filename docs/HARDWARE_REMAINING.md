@@ -22,7 +22,8 @@ independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
 ## Camera — Stages A+B done (2026-06-10); C–E need vacuum
 - [x] **Stage A** — identify: DU920P_BEN s/n 26178, detector 1024×255, settable range **-50..+26 C** (fixed code: MIN=-50/DEFAULT=-45), amp-mode mapping CONFIRMED (3/1/0.05 MHz × 1/2/4×, conventional, no EM). Found+fixed: **camera comes up cooler-ON every open → `open()` now force-disables it when warm**.
 - [x] **Stage B** — uncooled grab `(255,1024)` uint16, 1-D length 1024, live streaming, saturation guard — all OK; dark ~300 counts at 22 C/10 ms (`tests/acquire_andor.py`).
-- [ ] ⚠️ **Stage C** — cooling lifecycle UNDER VACUUM: `cooldown` → progress → stable → cooled frame → `safe_shutdown`. (Setpoint range is -50..-20 now; coldest reachable -50 C.)
+- [ ] ⚠️ **Cooling-unit switch (1 vs 2)** — the SDK's -50 C limit was read with the physical cooler switch on **position 1**; **position 2 is the deep/high-power cooling** (expected ~-100 C, likely water-assisted). When set to 2 + under vacuum: re-read the range and switch the code to **query `get_temperature_range()` dynamically** instead of the hardcoded -50.
+- [ ] ⚠️ **Stage C** — cooling lifecycle UNDER VACUUM: `cooldown` → progress → stable → cooled frame → `safe_shutdown`. (Setpoint range hardcoded -50..-20 for switch pos 1; see above.)
 - [ ] ⚠️ **Stage D** — interlock proof: `cooldown` REFUSED above `cooling_threshold`
 - [ ] ⚠️ **Stage E** — fan policy: air-cooled `'full'` vs water `'off'` — `CameraController.cooling_fan_mode` (came up `'off'`)
 - [ ] 🔧 Confirm **internal-shutter / trigger-mode** enum — `CameraController.configure`
