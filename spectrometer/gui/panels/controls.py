@@ -54,8 +54,8 @@ class CameraPanel(QGroupBox):
 
         grid = QGridLayout()
         self._setpoint = QDoubleSpinBox()
-        self._setpoint.setRange(-100.0, -20.0)  # Newton DO920P rated range
-        self._setpoint.setValue(-80.0)          # typical operating point
+        self._setpoint.setRange(-50.0, -20.0)   # DU920P_BEN settable min is -50 C (air-cooled)
+        self._setpoint.setValue(-45.0)          # in-range default
         self._setpoint.setSuffix(" °C")
         self._cool_btn = QPushButton("Cool down")
         self._warm_btn = QPushButton("Warm up / shutdown")

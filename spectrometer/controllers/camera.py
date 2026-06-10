@@ -29,10 +29,13 @@ from ..core.exceptions import InterlockError
 # at/around this count, so this is the practical per-pixel saturation guard.
 SATURATION_LEVEL = 65000
 
-# Andor Newton DO920P cooling spec: rated -100..-20 C, typical operating -80 C.
-MIN_SETPOINT_C = -100.0
+# Andor Newton DU920P_BEN (s/n 26178): the SDK reports a settable temperature
+# range of -50..+26 C on this rig (air-cooled), so -50 C is the coldest it can
+# reach -- NOT the -100/-80 the datasheet implies (that needs water cooling).
+# Confirmed on hw 2026-06-10 (tests/discover_andor.py).
+MIN_SETPOINT_C = -50.0
 MAX_SETPOINT_C = -20.0
-DEFAULT_SETPOINT_C = -80.0
+DEFAULT_SETPOINT_C = -45.0
 
 # Reference ambient for the cooldown-progress estimate (the sensor starts near
 # room temperature). Only used to render a progress fraction; not a control.
