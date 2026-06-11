@@ -19,6 +19,8 @@ class DummyVacuum(VacuumDriver):
         self._pressure = initial_pressure
         self._units = units
         self._connected = False
+        self._turbo_state = 0    # 0 stopped / 4 running (simulated, like the TIC)
+        self._backing_state = 0
 
     def open(self) -> None:
         self._connected = True
@@ -44,13 +46,29 @@ class DummyVacuum(VacuumDriver):
     def units(self) -> str:
         return self._units
 
-    # --- simulated read-only pump status (display only) ---------------
+    # --- simulated pump status + control ------------------------------
+    _STATE_NAMES = {0: "Stopped", 4: "Running", 5: "Accelerating"}
+
     def read_turbo_state(self) -> str:
-        # Pretend the turbo is at full speed once the pressure is low.
-        return "Normal" if self._pressure < 1.0 else "Accelerating"
+        return self._STATE_NAMES.get(self._turbo_state, "state %d" % self._turbo_state)
 
     def read_backing_state(self) -> str:
-        return "Running"
+        return self._STATE_NAMES.get(self._backing_state, "state %d" % self._backing_state)
+
+    def supports_control(self) -> bool:
+        return True
+
+    def set_turbo(self, on: bool) -> None:
+        self._turbo_state = 4 if on else 0
+
+    def set_backing(self, on: bool) -> None:
+        self._backing_state = 4 if on else 0
+
+    def turbo_state_code(self) -> int:
+        return self._turbo_state
+
+    def backing_state_code(self) -> int:
+        return self._backing_state
 
     # --- test/simulation helper (not part of the ABC) -----------------
     def set_pressure(self, pressure: float) -> None:

@@ -120,7 +120,10 @@ def test_vacuum_pump_status_in_snapshot(qapp):
         snaps = []
         w.status_updated.connect(snaps.append)
         w._poll_status()
-        assert snaps[-1]["vacuum_turbo"] in ("Normal", "Accelerating")
+        # Dummy pumps default to stopped; running them shows "Running".
+        assert snaps[-1]["vacuum_turbo"] == "Stopped"
+        sys.vacuum.backing_on()
+        w._poll_status()
         assert snaps[-1]["vacuum_backing"] == "Running"
         # offline -> no pump status (None, shown as '--')
         w.disconnect_device("vacuum")

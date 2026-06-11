@@ -101,16 +101,21 @@ class HardwareWorker(QObject):
                                 frost_point=s.vacuum.frost_point_c,
                                 min_safe_setpoint=s.camera.min_safe_setpoint_c(),
                                 vacuum_turbo=s.vacuum.turbo_state,
-                                vacuum_backing=s.vacuum.backing_state)
+                                vacuum_backing=s.vacuum.backing_state,
+                                turbo_running=s.vacuum.turbo_running,
+                                backing_running=s.vacuum.backing_running,
+                                vacuum_can_control=s.vacuum.supports_control)
                 except Exception as exc:
                     log.error("Vacuum poll failed: %s" % exc)
                     snap.update(vacuum="error", frost_point=None,
                                 min_safe_setpoint=None, vacuum_turbo=None,
-                                vacuum_backing=None)
+                                vacuum_backing=None, turbo_running=False,
+                                backing_running=False, vacuum_can_control=False)
             else:
                 snap.update(vacuum="offline", frost_point=None,
                             min_safe_setpoint=None, vacuum_turbo=None,
-                            vacuum_backing=None)
+                            vacuum_backing=None, turbo_running=False,
+                            backing_running=False, vacuum_can_control=False)
 
             if conn["camera"]:
                 self._drive_warmup()        # non-blocking warm-up state machine
@@ -466,6 +471,24 @@ class HardwareWorker(QObject):
             self.system.camera.configure(em_gain=value)
         except Exception as exc:
             self.error.emit("EM gain failed: %s" % exc)
+
+    @pyqtSlot(bool)
+    def set_turbo(self, on: bool) -> None:
+        v = self.system.vacuum
+        try:
+            (v.turbo_on if on else v.turbo_off)()
+        except Exception as exc:
+            self.error.emit(str(exc))
+        self._poll_status()
+
+    @pyqtSlot(bool)
+    def set_backing(self, on: bool) -> None:
+        v = self.system.vacuum
+        try:
+            (v.backing_on if on else v.backing_off)()
+        except Exception as exc:
+            self.error.emit(str(exc))
+        self._poll_status()
 
     @pyqtSlot(bool)
     def set_shutter(self, open_: bool) -> None:

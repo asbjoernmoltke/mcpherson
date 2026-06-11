@@ -18,6 +18,8 @@ independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
 - [x] ⚠️ **Cooling interlock = frost-point model** (2026-06-10): cooling is gated on sensor temp ≥ `frost_point(pressure) + 5 °C` (water-over-ice curve, total pressure taken as a conservative all-water proxy) — replaces the binary `cooling_threshold`. Deep cooling unlocks automatically as the chamber pumps down. GUI shows frost point + min safe setpoint. Margin in `CameraController.cooling_margin_c` (5 °C).
 - [x] 📋 **Pump status decoded + displayed** — turbo (nEXT85D) 904 state / 905 speed / 906 power, backing (nXDS) 910. State codes: turbo 0=stopped/5=starting/4=running, backing 0/4. GUI shows e.g. "Running, 78%".
 - [x] 📋 **Loss-of-vacuum = frost-risk alarm** — `SafetyManager.check_frost_risk` alarms when the sensor is colder than the min-safe setpoint for the current pressure.
+- [x] ⚙️ **Pump control implemented** (TIC manual D397-30-880): individual **turbo/backing start/stop** via `!C904`/`!C910`, interlocked — turbo won't start until **backing is Running (state 4)**; backing won't stop until **turbo is Stopped**. GUI buttons in the Vacuum panel. ⚠️ NOT hardware-verified yet (TIC offline). **Caveat: `!C` error 5 = TIC in PARALLEL control mode** (serial start/stop rejected) — the TIC must be in serial control mode.
+- [ ] ⚙️ **Vent button** — the TIC vent object **922 has NO manual `!C`** (only auto-vent *options*: on-stop / at-50%). For an explicit, camera-cold-interlocked vent button, **need the vent wiring**: if it's on a TIC **relay (916–918)** (which have `!C On/Off`) we drive that; otherwise reconfigure the auto-vent option. CONFIRM how the vent valve is connected.
 
 ## Camera — Stages A+B done (2026-06-10); C–E need vacuum
 - [x] **Stage A** — identify: DU920P_BEN s/n 26178, detector 1024×255, settable range **-50..+26 C** (fixed code: MIN=-50/DEFAULT=-45), amp-mode mapping CONFIRMED (3/1/0.05 MHz × 1/2/4×, conventional, no EM). Found+fixed: **camera comes up cooler-ON every open → `open()` now force-disables it when warm**.
@@ -56,4 +58,4 @@ independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
 ### Software follow-ups (no hardware needed)
 - [ ] Verify the per-device **Connect/Disconnect** bars on real hardware (coded + offline-tested; the real-driver `open()` reconnect path is untested on hw).
 - [ ] (Optional) Read-only pump status only becomes meaningful once the **TIC object IDs** above are confirmed.
-- [ ] (Optional, separate task) Interlocked **pump control** (start/stop/standby) — deferred by design.
+- [x] Interlocked **pump control** — implemented (see Vacuum section); hardware-verify when the TIC is reconnected. Vent button still pending the vent wiring.

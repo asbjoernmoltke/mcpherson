@@ -304,11 +304,30 @@ class VacuumDriver(Driver):
     def units(self) -> str:
         ...
 
-    # --- optional read-only pump status (display only; never commands) ---
+    # --- optional read-only pump status (display only) ----------------
     def read_turbo_state(self) -> Optional[str]:
         """Turbo-pump status string for display, or None if unavailable."""
         return None
 
     def read_backing_state(self) -> Optional[str]:
         """Backing-pump status string for display, or None if unavailable."""
+        return None
+
+    # --- optional pump CONTROL (overridden by controllers that allow it) ---
+    # Default: control unsupported. A controller that supports it implements
+    # set_turbo/set_backing (raising on rejection) and the state-code reads.
+    def supports_control(self) -> bool:
+        return False
+
+    def set_turbo(self, on: bool) -> None:
+        raise NotImplementedError("Pump control not supported by this driver.")
+
+    def set_backing(self, on: bool) -> None:
+        raise NotImplementedError("Pump control not supported by this driver.")
+
+    def turbo_state_code(self) -> Optional[int]:
+        """Turbo pump state code (0 Stopped, 4 Running, 5 Accelerating, ...)."""
+        return None
+
+    def backing_state_code(self) -> Optional[int]:
         return None

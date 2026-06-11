@@ -6,6 +6,7 @@ read -- vacuum is controlled manually on isolated hardware.
 """
 from __future__ import annotations
 
+from ..core.exceptions import InterlockError
 from ..drivers.base import VacuumDriver
 from ..utilities import log
 from .base import Controller
@@ -13,6 +14,10 @@ from .base import Controller
 # Default safe threshold for permitting cooling. The real value + the gauge's
 # units are an open item (see plan); make it explicit and configurable.
 DEFAULT_COOLING_THRESHOLD = 1.0e-2  # Pa (gauge's native unit); PLACEHOLDER -- confirm spec
+
+# Pump state codes (TIC manual 1.7.8): 0 Stopped, 4 Running, 5 Accelerating.
+PUMP_STOPPED = 0
+PUMP_RUNNING = 4
 
 
 class VacuumController(Controller):
@@ -58,6 +63,48 @@ class VacuumController(Controller):
         pressure at +inf, so this returns a high value (cooling blocked)."""
         from ..core.thermo import frost_point_c
         return frost_point_c(self.pressure_pa)
+
+    # --- pump control (interlocked) -----------------------------------
+    @property
+    def supports_control(self) -> bool:
+        return self.driver.supports_control()
+
+    @property
+    def turbo_running(self) -> bool:
+        return self.driver.turbo_state_code() == PUMP_RUNNING
+
+    @property
+    def backing_running(self) -> bool:
+        return self.driver.backing_state_code() == PUMP_RUNNING
+
+    def turbo_on(self) -> None:
+        """Start the turbo -- ONLY once the backing pump is running (the turbo
+        must not run without its exhaust)."""
+        if not self.backing_running:
+            raise InterlockError(
+                "Turbo can't start until the backing pump is running (normal "
+                "mode). Start the backing pump first.")
+        self.driver.set_turbo(True)
+        self._notify(self.status)
+
+    def turbo_off(self) -> None:
+        self.driver.set_turbo(False)
+        self._notify(self.status)
+
+    def backing_on(self) -> None:
+        self.driver.set_backing(True)
+        self._notify(self.status)
+
+    def backing_off(self) -> None:
+        """Stop the backing pump -- ONLY once the turbo is stopped (the turbo
+        needs the backing pump to exhaust)."""
+        st = self.driver.turbo_state_code()
+        if st is not None and st != PUMP_STOPPED:
+            raise InterlockError(
+                "Stop the turbo before the backing pump (the turbo needs the "
+                "backing pump to exhaust).")
+        self.driver.set_backing(False)
+        self._notify(self.status)
 
     # --- read-only pump status (display only; never commands the pumps) ---
     @property

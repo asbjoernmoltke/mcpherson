@@ -160,3 +160,35 @@ class EdwardsTIC(VacuumDriver):
         if st is None:
             return None
         return BACKING_STATE_NAMES.get(st, "state %d" % st)
+
+    # --- pump CONTROL (opt-in; interlocks live in VacuumController) ----
+    def supports_control(self) -> bool:
+        return True
+
+    def _command(self, obj: int, value: int) -> None:
+        """Send `!C<obj> <value>` and raise on rejection. Reply is
+        `*C<obj> <error>`; error 0 = accepted (manual Table 3). Error 5 means
+        the TIC is in parallel control mode and ignores serial start/stop."""
+        reply = self._comm("!C%d %d" % (obj, value))
+        parts = reply.replace(";", " ").split()
+        try:
+            err = int(parts[-1]) if parts else None
+        except ValueError:
+            err = None
+        if err != 0:
+            hint = (" -- the TIC is in PARALLEL control mode; set it to serial "
+                    "control to allow this." if err == 5 else "")
+            raise RuntimeError("TIC rejected !C%d %d (error %s)%s: %r"
+                               % (obj, value, err, hint, reply))
+
+    def set_turbo(self, on: bool) -> None:
+        self._command(self.turbo_object, 1 if on else 0)
+
+    def set_backing(self, on: bool) -> None:
+        self._command(self.backing_object, 1 if on else 0)
+
+    def turbo_state_code(self) -> Optional[int]:
+        return self._state_code(self.turbo_object)
+
+    def backing_state_code(self) -> Optional[int]:
+        return self._state_code(self.backing_object)

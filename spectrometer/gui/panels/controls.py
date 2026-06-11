@@ -174,6 +174,9 @@ class CameraPanel(QGroupBox):
 
 
 class VacuumPanel(QGroupBox):
+    turbo_toggled = pyqtSignal(bool)
+    backing_toggled = pyqtSignal(bool)
+
     def __init__(self):
         super().__init__("Vacuum")
         layout = QVBoxLayout(self)
@@ -185,13 +188,32 @@ class VacuumPanel(QGroupBox):
         # (frost point + margin) -- both fall as the chamber pumps down.
         self._frost = LabeledValue("Frost point")
         self._min_safe = LabeledValue("Min safe setpoint")
-        # Read-only pump status (display only -- the software never commands
-        # the pumps; they're run on isolated hardware).
         self._turbo = LabeledValue("Turbo pump")
         self._backing = LabeledValue("Backing pump")
         for w in (self._pressure, self._frost, self._min_safe, self._turbo,
                   self._backing):
             layout.addWidget(w)
+
+        # Pump control. The turbo can't start until the backing pump is running;
+        # the backing can't stop until the turbo is stopped (the controller
+        # enforces both -- the buttons just reflect it).
+        brow = QHBoxLayout()
+        self._backing_on = QPushButton("Backing start")
+        self._backing_off = QPushButton("Backing stop")
+        brow.addWidget(self._backing_on)
+        brow.addWidget(self._backing_off)
+        layout.addLayout(brow)
+        trow = QHBoxLayout()
+        self._turbo_on = QPushButton("Turbo start")
+        self._turbo_off = QPushButton("Turbo stop")
+        trow.addWidget(self._turbo_on)
+        trow.addWidget(self._turbo_off)
+        layout.addLayout(trow)
+
+        self._backing_on.clicked.connect(lambda: self.backing_toggled.emit(True))
+        self._backing_off.clicked.connect(lambda: self.backing_toggled.emit(False))
+        self._turbo_on.clicked.connect(lambda: self.turbo_toggled.emit(True))
+        self._turbo_off.clicked.connect(lambda: self.turbo_toggled.emit(False))
 
     @staticmethod
     def _fmt_temp(v) -> str:
@@ -205,6 +227,14 @@ class VacuumPanel(QGroupBox):
         self._min_safe.set_value(self._fmt_temp(s.get("min_safe_setpoint")))
         self._turbo.set_value(s.get("vacuum_turbo") or "--")
         self._backing.set_value(s.get("vacuum_backing") or "--")
+
+        can = s.get("vacuum_can_control", False)
+        turbo_run = s.get("turbo_running", False)
+        backing_run = s.get("backing_running", False)
+        self._backing_on.setEnabled(can and not backing_run)
+        self._backing_off.setEnabled(can and backing_run and not turbo_run)
+        self._turbo_on.setEnabled(can and backing_run and not turbo_run)
+        self._turbo_off.setEnabled(can and turbo_run)
 
 
 class GratingPanel(QGroupBox):
