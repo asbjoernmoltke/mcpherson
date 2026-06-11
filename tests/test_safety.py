@@ -19,32 +19,36 @@ def system():
     sys.close_all()
 
 
-# --- vacuum / cooling interlock --------------------------------------
-def test_cooldown_refused_when_vacuum_too_high(system):
-    # Dummy gauge starts at a poor vacuum (1e-2 mbar) -> cooling refused.
-    assert not system.vacuum.vacuum_ok
+# --- frost-point cooling interlock -----------------------------------
+def test_cooldown_gated_by_frost_point(system):
+    # Dummy gauge starts at 1e-2 mbar = 1 Pa -> frost point ~-61 C, so the min
+    # safe setpoint is ~-56 C: -60 is refused, but -50 (warmer) is allowed.
+    system.vacuum.poll()
+    assert system.vacuum.pressure_pa == pytest.approx(1.0, rel=0.05)
+    assert -58.0 < system.camera.min_safe_setpoint_c() < -53.0
     with pytest.raises(InterlockError):
         system.camera.cooldown(-60.0)
-    with pytest.raises(InterlockError):
-        system.safety.assert_can_cool()
-
-
-def test_cooldown_permitted_after_pumpdown(system):
-    system.devices.vacuum.set_pressure(1.0e-6)  # simulate pump-down
-    assert system.vacuum.vacuum_ok
-    system.safety.assert_can_cool()       # must not raise
-    system.camera.cooldown(-60.0)         # must not raise
+    system.camera.cooldown(-50.0)             # above the frost minimum -> ok
     assert system.devices.camera.is_cooler_on()
 
 
-def test_vacuum_lost_while_cold_raises_alarm(system):
+def test_deeper_cooling_unlocks_after_pumpdown(system):
+    system.devices.vacuum.set_pressure(1.0e-6)   # mbar -> 1e-4 Pa, frost ~-112 C
+    system.vacuum.poll()
+    assert system.camera.min_safe_setpoint_c() < -100.0
+    system.camera.cooldown(-50.0)                # deep cooling now allowed
+    assert system.devices.camera.is_cooler_on()
+
+
+def test_frost_risk_alarm_when_vacuum_degrades_while_cold(system):
     alarms: list[str] = []
     system.safety.add_alarm_listener(alarms.append)
-    system.devices.vacuum.set_pressure(1.0e-6)
-    system.camera.cooldown(-60.0)          # cooler now on
-    system.devices.vacuum.set_pressure(1.0e-1)  # vacuum lost
-    assert system.safety.check_vacuum_while_cold() is True
-    assert any("VACUUM LOST" in a for a in alarms)
+    system.devices.vacuum.set_pressure(1.0e-6); system.vacuum.poll()
+    system.camera.cooldown(-50.0)                # cooler on
+    system.devices.camera._temp = -50.0          # force the sensor cold
+    system.devices.vacuum.set_pressure(1.0e-1); system.vacuum.poll()  # 10 Pa: min safe ~-37
+    assert system.safety.check_frost_risk() is True
+    assert any("FROST RISK" in a for a in alarms)
 
 
 # --- emergency stop ---------------------------------------------------

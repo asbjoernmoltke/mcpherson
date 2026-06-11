@@ -76,7 +76,7 @@ def build_system(dummy: bool = False, *, grating_port: str = "COM5",
     calibration = default_calibration(grating_name, n_pixels=1024)
 
     camera = CameraController(devices.camera,
-                              vacuum_ok=lambda: vacuum.vacuum_ok,
+                              frost_point=lambda: vacuum.frost_point_c,
                               abort=abort)
     grating = GratingController(devices.grating, calibration=calibration)
     shutter = ShutterController(devices.shutter)

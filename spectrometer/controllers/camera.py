@@ -40,6 +40,10 @@ MIN_SETPOINT_C = -50.0
 MAX_SETPOINT_C = -20.0
 DEFAULT_SETPOINT_C = -45.0
 
+# Safety margin (deg C) the sensor must stay ABOVE the frost point. The lab air
+# is fairly dry, so 5 C is enough headroom; raise it to be more cautious.
+COOLING_MARGIN_C = 5.0
+
 # Reference ambient for the cooldown-progress estimate (the sensor starts near
 # room temperature). Only used to render a progress fraction; not a control.
 AMBIENT_REF_C = 21.0
@@ -47,14 +51,18 @@ AMBIENT_REF_C = 21.0
 
 class CameraController(Controller):
     def __init__(self, driver: CameraDriver, *,
-                 vacuum_ok: Callable[[], bool],
+                 frost_point: Callable[[], float],
+                 cooling_margin_c: float = COOLING_MARGIN_C,
                  warm_target_c: float = 10.0,
                  stable_timeout_s: float = 300.0,
                  cooling_fan_mode: str = "full",
                  abort: Optional[threading.Event] = None):
         super().__init__("Camera")
         self.driver = driver
-        self._vacuum_ok = vacuum_ok
+        # ``frost_point()`` returns the current frost point (deg C) from the
+        # vacuum gauge; the sensor must stay >= frost_point + cooling_margin_c.
+        self._frost_point = frost_point
+        self.cooling_margin_c = cooling_margin_c
         self.warm_target_c = warm_target_c
         self.stable_timeout_s = stable_timeout_s
         # Fan mode while cooling. Default 'full' (safe for air-cooled deep
@@ -63,13 +71,33 @@ class CameraController(Controller):
         self._abort = abort or threading.Event()
         self.last_frame_saturated = False
 
+    # --- frost-point interlock ----------------------------------------
+    def min_safe_setpoint_c(self) -> float:
+        """Coldest setpoint allowed at the current pressure: the frost point
+        plus the safety margin. Falls as the chamber pumps down."""
+        return self._frost_point() + self.cooling_margin_c
+
+    def is_at_frost_risk(self) -> bool:
+        """True when the cooler is on and the sensor is colder than the current
+        min-safe setpoint -- i.e. at/over the frost point for this pressure."""
+        try:
+            return (self.driver.is_cooler_on()
+                    and self.driver.get_temperature() < self.min_safe_setpoint_c())
+        except Exception:  # pragma: no cover - hardware dependent
+            return False
+
     # --- cooling lifecycle --------------------------------------------
     def cooldown(self, setpoint_c: float) -> None:
-        """Begin cooling to ``setpoint_c`` -- gated on the vacuum interlock.
-        Clamped to the camera's rated range and turns the fan on first."""
-        if not self._vacuum_ok():
+        """Begin cooling to ``setpoint_c`` -- gated on the frost-point interlock
+        (sensor must stay above the chamber's frost point + margin). Clamped to
+        the camera's rated range; turns the fan on first."""
+        min_safe = self.min_safe_setpoint_c()
+        if setpoint_c < min_safe:
             raise InterlockError(
-                "Refusing to cool the camera: vacuum is not sufficient.")
+                "Refusing to cool to %.1f C: the frost point at the current "
+                "pressure is %.1f C, so the minimum safe setpoint is %.1f C "
+                "(frost point + %.1f C margin). Pump down further to go colder."
+                % (setpoint_c, self._frost_point(), min_safe, self.cooling_margin_c))
         setpoint_c = max(MIN_SETPOINT_C, min(MAX_SETPOINT_C, setpoint_c))
         # Fan on before cooling hard (dissipates heat from the TE cooler).
         try:

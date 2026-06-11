@@ -15,16 +15,16 @@ gauge); serial **unit = Pa** (1.0000e+05 Pa = 750 Torr = atm; the panel unit is
 independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
 `vacuum_units="Pa"`.
 
-- [ ] ⚠️ Set the **safe cooling threshold** — still TBD (now a `1e-2` **Pa** placeholder). Pump-down 2026-06-10 reached ~27 Pa with the turbo still spinning up; pick the threshold once we know the base pressure — `cooling_threshold`
+- [x] ⚠️ **Cooling interlock = frost-point model** (2026-06-10): cooling is gated on sensor temp ≥ `frost_point(pressure) + 5 °C` (water-over-ice curve, total pressure taken as a conservative all-water proxy) — replaces the binary `cooling_threshold`. Deep cooling unlocks automatically as the chamber pumps down. GUI shows frost point + min safe setpoint. Margin in `CameraController.cooling_margin_c` (5 °C).
 - [x] 📋 **Pump status decoded + displayed** — turbo (nEXT85D) 904 state / 905 speed / 906 power, backing (nXDS) 910. State codes: turbo 0=stopped/5=starting/4=running, backing 0/4. GUI shows e.g. "Running, 78%".
-- [ ] 📋 Decide the **loss-of-vacuum** alarm behaviour (warn-only) — `SafetyManager.check_vacuum_while_cold`
+- [x] 📋 **Loss-of-vacuum = frost-risk alarm** — `SafetyManager.check_frost_risk` alarms when the sensor is colder than the min-safe setpoint for the current pressure.
 
 ## Camera — Stages A+B done (2026-06-10); C–E need vacuum
 - [x] **Stage A** — identify: DU920P_BEN s/n 26178, detector 1024×255, settable range **-50..+26 C** (fixed code: MIN=-50/DEFAULT=-45), amp-mode mapping CONFIRMED (3/1/0.05 MHz × 1/2/4×, conventional, no EM). Found+fixed: **camera comes up cooler-ON every open → `open()` now force-disables it when warm**.
 - [x] **Stage B** — uncooled grab `(255,1024)` uint16, 1-D length 1024, live streaming, saturation guard — all OK; dark ~300 counts at 22 C/10 ms (`tests/acquire_andor.py`).
 - [ ] ⚠️ **Cooling-unit switch (1 vs 2)** — the SDK's -50 C limit was read with the physical cooler switch on **position 1**; **position 2 is the deep/high-power cooling** (expected ~-100 C, likely water-assisted). When set to 2 + under vacuum: re-read the range and switch the code to **query `get_temperature_range()` dynamically** instead of the hardcoded -50.
 - [ ] ⚠️ **Stage C** — cooling lifecycle UNDER VACUUM: `cooldown` → progress → stable → cooled frame → `safe_shutdown`. (Setpoint range hardcoded -50..-20 for switch pos 1; see above.)
-- [ ] ⚠️ **Stage D** — interlock proof: `cooldown` REFUSED above `cooling_threshold`
+- [ ] ⚠️ **Stage D** — interlock proof on hw (vacuum + camera both up): `cooldown` refused below `frost_point + margin`; frost-risk alarm fires if vacuum degrades while cold
 - [ ] ⚠️ **Stage E** — fan policy: air-cooled `'full'` vs water `'off'` — `CameraController.cooling_fan_mode` (came up `'off'`)
 - [ ] 🔧 Confirm **internal-shutter / trigger-mode** enum — `CameraController.configure`
 

@@ -181,17 +181,28 @@ class VacuumPanel(QGroupBox):
         self.connection_bars = [self.conn]
         layout.addWidget(self.conn)
         self._pressure = LabeledValue("Pressure")
-        self._ok = StatusLamp("Safe to cool")
+        # Frost point + the coldest setpoint the camera may cool to right now
+        # (frost point + margin) -- both fall as the chamber pumps down.
+        self._frost = LabeledValue("Frost point")
+        self._min_safe = LabeledValue("Min safe setpoint")
         # Read-only pump status (display only -- the software never commands
         # the pumps; they're run on isolated hardware).
         self._turbo = LabeledValue("Turbo pump")
         self._backing = LabeledValue("Backing pump")
-        for w in (self._pressure, self._ok, self._turbo, self._backing):
+        for w in (self._pressure, self._frost, self._min_safe, self._turbo,
+                  self._backing):
             layout.addWidget(w)
+
+    @staticmethod
+    def _fmt_temp(v) -> str:
+        if v is None:
+            return "--"
+        return "%.0f °C" % v if v < 100.0 else "— (too warm)"
 
     def update(self, s: dict) -> None:
         self._pressure.set_value(s["vacuum"])
-        self._ok.set_state(_lamp_state(s["vacuum_ok"]))
+        self._frost.set_value(self._fmt_temp(s.get("frost_point")))
+        self._min_safe.set_value(self._fmt_temp(s.get("min_safe_setpoint")))
         self._turbo.set_value(s.get("vacuum_turbo") or "--")
         self._backing.set_value(s.get("vacuum_backing") or "--")
 

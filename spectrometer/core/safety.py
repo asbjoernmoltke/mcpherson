@@ -101,18 +101,21 @@ class SafetyManager:
             raise EStopActive("Emergency stop is engaged; reset to continue.")
 
     def assert_can_cool(self) -> None:
-        """Raise unless it is safe to begin cooling the camera."""
+        """Raise unless cooling may be initiated at all. The per-setpoint
+        frost-point gate lives in ``CameraController.cooldown``; here we only
+        block on the E-stop."""
         self.assert_not_estopped()
-        if not self.vacuum.vacuum_ok:
-            raise InterlockError(
-                "Vacuum insufficient (%s); cooling is not permitted."
-                % self.vacuum.status)
 
-    def check_vacuum_while_cold(self) -> bool:
-        """Call periodically. Returns True if a vacuum alarm was raised."""
-        if self.camera.driver.is_cooler_on() and not self.vacuum.vacuum_ok:
-            self._alarm("VACUUM LOST while camera is cold (%s). Warm up the "
-                        "camera and investigate immediately." % self.vacuum.status)
+    def check_frost_risk(self) -> bool:
+        """Call periodically. Returns True (and raises an alarm) if the sensor
+        is colder than the frost-point-safe minimum for the current pressure --
+        e.g. vacuum degraded while the camera is cold."""
+        if self.camera.is_at_frost_risk():
+            self._alarm(
+                "FROST RISK: sensor is colder than the safe minimum for the "
+                "current pressure (frost point %.1f C, %s). Warm the camera / "
+                "improve vacuum immediately."
+                % (self.vacuum.frost_point_c, self.vacuum.status))
             return True
         return False
 

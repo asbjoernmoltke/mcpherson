@@ -42,6 +42,23 @@ class VacuumController(Controller):
     def units(self) -> str:
         return self.driver.units
 
+    # --- frost-point interlock support --------------------------------
+    _UNIT_TO_PA = {"pa": 1.0, "mbar": 100.0, "torr": 133.322}
+
+    @property
+    def pressure_pa(self) -> float:
+        """Cached pressure converted to Pa (the frost-point math works in Pa).
+        Unknown units pass through unscaled."""
+        return self._pressure * self._UNIT_TO_PA.get(self.units.lower(), 1.0)
+
+    @property
+    def frost_point_c(self) -> float:
+        """Frost point (deg C) at the current pressure -- the temperature below
+        which the sensor risks condensation. A read failure leaves the cached
+        pressure at +inf, so this returns a high value (cooling blocked)."""
+        from ..core.thermo import frost_point_c
+        return frost_point_c(self.pressure_pa)
+
     # --- read-only pump status (display only; never commands the pumps) ---
     @property
     def turbo_state(self) -> str | None:

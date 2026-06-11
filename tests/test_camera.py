@@ -89,7 +89,7 @@ def test_cooldown_cancels_pending_warmup(qapp):
 
 # --- config pass-through + capability discovery -----------------------
 def test_capabilities_lists_options_for_dummy():
-    cam = CameraController(DummyCamera(), vacuum_ok=lambda: True)
+    cam = CameraController(DummyCamera(), frost_point=lambda: -100.0)
     caps = cam.capabilities()
     assert caps["trigger_modes"][0] == "int"
     assert "auto" in caps["internal_shutter_modes"]
@@ -100,7 +100,7 @@ def test_capabilities_lists_options_for_dummy():
 
 def test_configure_passes_through_to_driver():
     drv = DummyCamera()
-    cam = CameraController(drv, vacuum_ok=lambda: True)
+    cam = CameraController(drv, frost_point=lambda: -100.0)
     cam.configure(exposure_s=0.25, trigger_mode="ext",
                   internal_shutter="open", readout_index=2, preamp_index=1)
     assert drv.get_exposure() == 0.25
@@ -111,7 +111,7 @@ def test_configure_passes_through_to_driver():
 
 
 def test_em_gain_unsupported_raises_on_conventional_ccd():
-    cam = CameraController(DummyCamera(), vacuum_ok=lambda: True)
+    cam = CameraController(DummyCamera(), frost_point=lambda: -100.0)
     with pytest.raises(NotImplementedError):
         cam.configure(em_gain=100)
 
@@ -129,7 +129,7 @@ def test_em_gain_supported_on_emccd_stub():
             return self._em
 
     drv = EmccdDummy()
-    cam = CameraController(drv, vacuum_ok=lambda: True)
+    cam = CameraController(drv, frost_point=lambda: -100.0)
     assert cam.capabilities()["em_gain_range"] == (1, 300)
     cam.configure(em_gain=150)
     assert drv.get_em_gain() == 150
