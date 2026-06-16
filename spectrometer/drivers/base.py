@@ -325,6 +325,15 @@ class VacuumDriver(Driver):
     def set_backing(self, on: bool) -> None:
         raise NotImplementedError("Pump control not supported by this driver.")
 
+    def set_turbo_standby(self, on: bool) -> None:
+        """Put the turbo into standby (reduced set speed, still under vacuum)
+        or back to full speed -- the gentle spin-down that does NOT vent."""
+        raise NotImplementedError("Standby not supported by this driver.")
+
+    def turbo_standby_active(self) -> Optional[bool]:
+        """True if the turbo is in standby, False if not, None if unknown."""
+        return None
+
     def turbo_state_code(self) -> Optional[int]:
         """Turbo pump state code (0 Stopped, 4 Running, 5 Accelerating, ...)."""
         return None

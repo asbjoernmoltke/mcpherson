@@ -104,6 +104,7 @@ class HardwareWorker(QObject):
                                 vacuum_backing=s.vacuum.backing_state,
                                 turbo_running=s.vacuum.turbo_running,
                                 backing_running=s.vacuum.backing_running,
+                                turbo_standby=s.vacuum.turbo_standby,
                                 vacuum_can_control=s.vacuum.supports_control)
                 except Exception as exc:
                     log.error("Vacuum poll failed: %s" % exc)
@@ -115,7 +116,8 @@ class HardwareWorker(QObject):
                 snap.update(vacuum="offline", frost_point=None,
                             min_safe_setpoint=None, vacuum_turbo=None,
                             vacuum_backing=None, turbo_running=False,
-                            backing_running=False, vacuum_can_control=False)
+                            backing_running=False, turbo_standby=False,
+                            vacuum_can_control=False)
 
             if conn["camera"]:
                 self._drive_warmup()        # non-blocking warm-up state machine
@@ -486,6 +488,15 @@ class HardwareWorker(QObject):
         v = self.system.vacuum
         try:
             (v.backing_on if on else v.backing_off)()
+        except Exception as exc:
+            self.error.emit(str(exc))
+        self._poll_status()
+
+    @pyqtSlot(bool)
+    def set_turbo_standby(self, on: bool) -> None:
+        v = self.system.vacuum
+        try:
+            (v.turbo_standby_on if on else v.turbo_standby_off)()
         except Exception as exc:
             self.error.emit(str(exc))
         self._poll_status()

@@ -21,6 +21,7 @@ class DummyVacuum(VacuumDriver):
         self._connected = False
         self._turbo_state = 0    # 0 stopped / 4 running (simulated, like the TIC)
         self._backing_state = 0
+        self._turbo_standby = False
 
     def open(self) -> None:
         self._connected = True
@@ -63,9 +64,17 @@ class DummyVacuum(VacuumDriver):
 
     def set_turbo(self, on: bool) -> None:
         self._turbo_state = 4 if on else 0
+        if not on:
+            self._turbo_standby = False   # stopping clears standby
 
     def set_backing(self, on: bool) -> None:
         self._backing_state = 4 if on else 0
+
+    def set_turbo_standby(self, on: bool) -> None:
+        self._turbo_standby = bool(on)
+
+    def turbo_standby_active(self) -> bool:
+        return self._turbo_standby
 
     def turbo_state_code(self) -> int:
         return self._turbo_state

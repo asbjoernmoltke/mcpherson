@@ -176,6 +176,7 @@ class CameraPanel(QGroupBox):
 class VacuumPanel(QGroupBox):
     turbo_toggled = pyqtSignal(bool)
     backing_toggled = pyqtSignal(bool)
+    standby_toggled = pyqtSignal(bool)
 
     def __init__(self):
         super().__init__("Vacuum")
@@ -209,11 +210,19 @@ class VacuumPanel(QGroupBox):
         trow.addWidget(self._turbo_on)
         trow.addWidget(self._turbo_off)
         layout.addLayout(trow)
+        # Gentle spin-down: standby holds the turbo at reduced speed without
+        # stopping it -- stays under vacuum and (auto-vent 'On stop') won't vent.
+        self._standby = QPushButton("Turbo standby")
+        self._standby.setCheckable(True)
+        self._standby.setToolTip(
+            "Hold the turbo at reduced speed (no vent). Uncheck for full speed.")
+        layout.addWidget(self._standby)
 
         self._backing_on.clicked.connect(lambda: self.backing_toggled.emit(True))
         self._backing_off.clicked.connect(lambda: self.backing_toggled.emit(False))
         self._turbo_on.clicked.connect(lambda: self.turbo_toggled.emit(True))
         self._turbo_off.clicked.connect(lambda: self.turbo_toggled.emit(False))
+        self._standby.clicked.connect(lambda checked: self.standby_toggled.emit(checked))
 
     @staticmethod
     def _fmt_temp(v) -> str:
@@ -235,6 +244,10 @@ class VacuumPanel(QGroupBox):
         self._backing_off.setEnabled(can and backing_run and not turbo_run)
         self._turbo_on.setEnabled(can and backing_run and not turbo_run)
         self._turbo_off.setEnabled(can and turbo_run)
+        # Standby only while the turbo is spinning; reflect the live state
+        # (setChecked doesn't fire 'clicked', so no command is emitted here).
+        self._standby.setEnabled(can and turbo_run)
+        self._standby.setChecked(bool(s.get("turbo_standby", False)))
 
 
 class GratingPanel(QGroupBox):

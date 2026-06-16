@@ -91,6 +91,27 @@ class VacuumController(Controller):
         self.driver.set_turbo(False)
         self._notify(self.status)
 
+    @property
+    def turbo_standby(self) -> bool:
+        """True if the turbo is held at reduced (standby) speed."""
+        return bool(self.driver.turbo_standby_active())
+
+    def turbo_standby_on(self) -> None:
+        """Decelerate the turbo to standby speed -- the gentle spin-down that
+        stays under vacuum and (with auto-vent 'On stop') does NOT vent. Only
+        meaningful while the turbo is spinning."""
+        st = self.driver.turbo_state_code()
+        if st == PUMP_STOPPED:
+            raise InterlockError(
+                "The turbo is stopped -- nothing to put into standby.")
+        self.driver.set_turbo_standby(True)
+        self._notify(self.status)
+
+    def turbo_standby_off(self) -> None:
+        """Return the turbo from standby to full speed."""
+        self.driver.set_turbo_standby(False)
+        self._notify(self.status)
+
     def backing_on(self) -> None:
         self.driver.set_backing(True)
         self._notify(self.status)

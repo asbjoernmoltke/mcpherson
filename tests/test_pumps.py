@@ -47,6 +47,27 @@ def test_backing_off_refused_while_turbo_running():
         s.close_all()
 
 
+def test_turbo_standby_requires_running_turbo():
+    s = _sys()
+    try:
+        # Standby is meaningless while the turbo is stopped.
+        with pytest.raises(InterlockError):
+            s.vacuum.turbo_standby_on()
+        s.vacuum.backing_on()
+        s.vacuum.turbo_on()
+        assert not s.vacuum.turbo_standby
+        s.vacuum.turbo_standby_on()             # gentle spin-down, no vent
+        assert s.vacuum.turbo_standby
+        s.vacuum.turbo_standby_off()
+        assert not s.vacuum.turbo_standby
+        # Stopping the turbo clears standby.
+        s.vacuum.turbo_standby_on()
+        s.vacuum.turbo_off()
+        assert not s.vacuum.turbo_standby
+    finally:
+        s.close_all()
+
+
 def test_worker_pump_slots_and_snapshot(qapp):
     s = _sys()
     try:

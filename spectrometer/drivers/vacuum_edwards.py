@@ -49,7 +49,7 @@ class EdwardsTIC(VacuumDriver):
                  units: str = "Pa", baudrate: int = 9600,
                  terminator: str = "\r", timeout: float = 0.6,
                  turbo_object: int = 904, turbo_speed_object: int = 905,
-                 backing_object: int = 910):
+                 backing_object: int = 910, standby_object: int = 908):
         self.port = port
         # Accept a slot (1/2/3) or a raw object id (>=900).
         self.gauge_object = GAUGE_OBJECTS.get(gauge, gauge)
@@ -60,6 +60,7 @@ class EdwardsTIC(VacuumDriver):
         self.turbo_object = turbo_object
         self.turbo_speed_object = turbo_speed_object  # 905: turbo speed (%)
         self.backing_object = backing_object
+        self.standby_object = standby_object  # 908: turbo standby
         self._ser: Optional[serial.Serial] = None
         self._lock = threading.Lock()
 
@@ -192,6 +193,15 @@ class EdwardsTIC(VacuumDriver):
 
     def set_backing(self, on: bool) -> None:
         self._command(self.backing_object, 1 if on else 0)
+
+    def set_turbo_standby(self, on: bool) -> None:
+        # Object 908: !C 1 = enter standby, 0 = full speed (manual Table 1).
+        self._command(self.standby_object, 1 if on else 0)
+
+    def turbo_standby_active(self) -> Optional[bool]:
+        # ?V908 -> 4 = in standby, 0 = not.
+        code = self._state_code(self.standby_object)
+        return None if code is None else code == 4
 
     def turbo_state_code(self) -> Optional[int]:
         return self._state_code(self.turbo_object)
