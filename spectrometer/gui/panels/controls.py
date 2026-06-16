@@ -191,8 +191,11 @@ class VacuumPanel(QGroupBox):
         self._min_safe = LabeledValue("Min safe setpoint")
         self._turbo = LabeledValue("Turbo pump")
         self._backing = LabeledValue("Backing pump")
+        # Dedicated fault field: controller alerts (over-temp/over-pressure) and
+        # the turbo-without-backing condition. Turns red when something is wrong.
+        self._alerts = LabeledValue("Alerts", "None")
         for w in (self._pressure, self._frost, self._min_safe, self._turbo,
-                  self._backing):
+                  self._backing, self._alerts):
             layout.addWidget(w)
 
         # Pump control. The turbo can't start until the backing pump is running;
@@ -236,6 +239,9 @@ class VacuumPanel(QGroupBox):
         self._min_safe.set_value(self._fmt_temp(s.get("min_safe_setpoint")))
         self._turbo.set_value(s.get("vacuum_turbo") or "--")
         self._backing.set_value(s.get("vacuum_backing") or "--")
+        alerts = s.get("vacuum_alerts") or []
+        self._alerts.set_value("; ".join(alerts) if alerts else "None",
+                               alert=bool(alerts))
 
         can = s.get("vacuum_can_control", False)
         turbo_run = s.get("turbo_running", False)

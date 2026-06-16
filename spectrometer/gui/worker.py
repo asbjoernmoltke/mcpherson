@@ -97,6 +97,7 @@ class HardwareWorker(QObject):
                 try:
                     s.vacuum.poll()
                     s.safety.check_frost_risk()
+                    alerts = s.safety.check_pump_health()
                     snap.update(vacuum=s.vacuum.status,
                                 frost_point=s.vacuum.frost_point_c,
                                 min_safe_setpoint=s.camera.min_safe_setpoint_c(),
@@ -105,19 +106,22 @@ class HardwareWorker(QObject):
                                 turbo_running=s.vacuum.turbo_running,
                                 backing_running=s.vacuum.backing_running,
                                 turbo_standby=s.vacuum.turbo_standby,
+                                vacuum_alerts=alerts,
                                 vacuum_can_control=s.vacuum.supports_control)
                 except Exception as exc:
                     log.error("Vacuum poll failed: %s" % exc)
                     snap.update(vacuum="error", frost_point=None,
                                 min_safe_setpoint=None, vacuum_turbo=None,
                                 vacuum_backing=None, turbo_running=False,
-                                backing_running=False, vacuum_can_control=False)
+                                backing_running=False, turbo_standby=False,
+                                vacuum_alerts=["Vacuum poll failed"],
+                                vacuum_can_control=False)
             else:
                 snap.update(vacuum="offline", frost_point=None,
                             min_safe_setpoint=None, vacuum_turbo=None,
                             vacuum_backing=None, turbo_running=False,
                             backing_running=False, turbo_standby=False,
-                            vacuum_can_control=False)
+                            vacuum_alerts=[], vacuum_can_control=False)
 
             if conn["camera"]:
                 self._drive_warmup()        # non-blocking warm-up state machine
@@ -478,6 +482,9 @@ class HardwareWorker(QObject):
     def set_turbo(self, on: bool) -> None:
         v = self.system.vacuum
         try:
+            if not on:
+                # Stopping the turbo auto-vents -- block while the camera is cold.
+                self.system.safety.assert_can_stop_pumping()
             (v.turbo_on if on else v.turbo_off)()
         except Exception as exc:
             self.error.emit(str(exc))
@@ -496,6 +503,9 @@ class HardwareWorker(QObject):
     def set_turbo_standby(self, on: bool) -> None:
         v = self.system.vacuum
         try:
+            if on:
+                # Standby lets pressure drift up -- block while the camera is cold.
+                self.system.safety.assert_can_stop_pumping()
             (v.turbo_standby_on if on else v.turbo_standby_off)()
         except Exception as exc:
             self.error.emit(str(exc))

@@ -68,6 +68,52 @@ def test_turbo_standby_requires_running_turbo():
         s.close_all()
 
 
+def test_turbo_stop_blocked_while_camera_cold():
+    s = _sys()
+    try:
+        s.vacuum.backing_on()
+        s.vacuum.turbo_on()
+        cam = s.devices.camera                  # make the camera read cold
+        cam.set_cooler(True)
+        cam._setpoint = -45.0
+        cam._temp = -45.0
+        assert s.camera.is_cold
+        with pytest.raises(InterlockError):
+            s.safety.assert_can_stop_pumping()  # turbo-stop auto-vents -> frost
+        cam.set_cooler(False)                   # warm/cooler off -> allowed
+        assert not s.camera.is_cold
+        s.safety.assert_can_stop_pumping()      # no raise
+    finally:
+        s.close_all()
+
+
+def test_pump_health_flags_turbo_without_backing():
+    s = _sys()
+    try:
+        s.devices.vacuum.set_turbo(True)        # turbo Running, backing Stopped
+        issues = s.safety.check_pump_health()
+        assert any("backing" in m.lower() for m in issues)
+    finally:
+        s.close_all()
+
+
+def test_pump_alerts_surface_in_health_and_snapshot(qapp):
+    s = _sys()
+    try:
+        s.devices.vacuum.set_alerts(["Turbo: Temp Alert"])
+        assert "Turbo: Temp Alert" in s.vacuum.alerts
+        assert "Turbo: Temp Alert" in s.safety.check_pump_health()
+
+        from spectrometer.gui.worker import HardwareWorker
+        w = HardwareWorker(s)
+        snaps: list[dict] = []
+        w.status_updated.connect(snaps.append)
+        w._poll_status()
+        assert "Turbo: Temp Alert" in snaps[-1]["vacuum_alerts"]
+    finally:
+        s.close_all()
+
+
 def test_worker_pump_slots_and_snapshot(qapp):
     s = _sys()
     try:

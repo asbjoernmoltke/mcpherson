@@ -22,6 +22,7 @@ class DummyVacuum(VacuumDriver):
         self._turbo_state = 0    # 0 stopped / 4 running (simulated, like the TIC)
         self._backing_state = 0
         self._turbo_standby = False
+        self._alerts: list[str] = []
 
     def open(self) -> None:
         self._connected = True
@@ -52,6 +53,9 @@ class DummyVacuum(VacuumDriver):
         0: "Stopped", 1: "Starting", 2: "Stopping", 3: "Stopping",
         4: "Running", 5: "Accelerating", 6: "Braking", 7: "Braking",
     }
+
+    def read_alerts(self) -> list[str]:
+        return list(self._alerts)
 
     def read_turbo_state(self) -> str:
         return self._STATE_NAMES.get(self._turbo_state, "state %d" % self._turbo_state)
@@ -87,3 +91,7 @@ class DummyVacuum(VacuumDriver):
         """Simulate a pressure change (e.g. pump-down) for offline tests."""
         self._pressure = pressure
         log.info("DummyVacuum: pressure set to %.2e %s" % (pressure, self._units))
+
+    def set_alerts(self, alerts: list[str]) -> None:
+        """Simulate active controller alerts for offline tests."""
+        self._alerts = list(alerts)

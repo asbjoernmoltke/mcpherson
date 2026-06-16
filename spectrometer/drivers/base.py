@@ -305,6 +305,11 @@ class VacuumDriver(Driver):
         ...
 
     # --- optional read-only pump status (display only) ----------------
+    def read_alerts(self) -> list[str]:
+        """Active fault/alert strings from the controller (e.g. a pump
+        over-temperature or over-pressure), or [] if all clear/unsupported."""
+        return []
+
     def read_turbo_state(self) -> Optional[str]:
         """Turbo-pump status string for display, or None if unavailable."""
         return None

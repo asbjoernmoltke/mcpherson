@@ -143,6 +143,16 @@ class VacuumController(Controller):
             return None
 
     @property
+    def alerts(self) -> list[str]:
+        """Active controller fault/alert strings (e.g. turbo over-temperature),
+        empty if all clear. A read failure reports a single read-error alert."""
+        try:
+            return list(self.driver.read_alerts())
+        except Exception as exc:
+            log.error("Vacuum alert read failed: %s" % exc)
+            return ["Vacuum: alert read failed"]
+
+    @property
     def vacuum_ok(self) -> bool:
         """True when pressure is at/below the safe cooling threshold. A read
         error is fail-safe: returns False (cannot confirm vacuum => not safe)."""

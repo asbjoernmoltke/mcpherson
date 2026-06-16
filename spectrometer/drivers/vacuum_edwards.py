@@ -43,6 +43,22 @@ PUMP_STATE_NAMES = {
 TURBO_STATE_NAMES = PUMP_STATE_NAMES
 BACKING_STATE_NAMES = PUMP_STATE_NAMES
 
+# Alert IDs (TIC manual §1.7.3). Every ?V reply ends in ``; <alert ID>; <prio>``;
+# 0 = No Alert. Only the codes that can plausibly show on a pump/gauge are named
+# here -- the rest fall back to "alert <n>".
+ALERT_NAMES = {
+    0: "No Alert", 1: "ADC Fault", 2: "ADC Not Ready", 3: "Over Range",
+    4: "Under Range", 5: "ADC Invalid", 6: "No Gauge", 7: "Unknown",
+    8: "Not Supported", 13: "Ion Em Timeout", 14: "Not Struck",
+    15: "Filament Fail", 23: "Over Pressure", 24: "ASG Cant Zero",
+    25: "RampUp Timeout", 26: "Droop Timeout", 27: "Run Hours High",
+    28: "SC Interlock", 29: "ID Volts Error", 30: "Serial ID Fail",
+    31: "Upload Active", 32: "DX Fault", 33: "Temp Alert",
+    34: "SYSI Inhibit", 35: "Ext Inhibit", 36: "Temp Inhibit",
+    37: "No Reading", 39: "NOV Failure", 46: "Brownout/Short",
+    47: "Service due",
+}
+
 
 class EdwardsTIC(VacuumDriver):
     def __init__(self, port: str = "COM7", *, gauge: int = 1,
@@ -148,6 +164,30 @@ class EdwardsTIC(VacuumDriver):
             return int(float(self.parse_value_reply(self._comm("?V%d" % obj))[0]))
         except Exception:
             return None
+
+    def _object_alert(self, obj: int) -> Optional[tuple[int, int]]:
+        """(alert id, priority) for an object. Every value reply ends in
+        ``...; <alert id>; <priority>`` (manual Table 1), so the alert is the
+        second-to-last field regardless of how many data fields precede it."""
+        try:
+            fields = self.parse_value_reply(self._comm("?V%d" % obj))
+            if len(fields) >= 2:
+                return int(float(fields[-2])), int(float(fields[-1]))
+        except Exception:
+            return None
+        return None
+
+    def read_alerts(self) -> list[str]:
+        """Active (non-zero) alerts on the turbo, backing pump, and gauge."""
+        out: list[str] = []
+        for obj, label in ((self.turbo_object, "Turbo"),
+                           (self.backing_object, "Backing"),
+                           (self.gauge_object, "Gauge")):
+            a = self._object_alert(obj)
+            if a and a[0] != 0:
+                name = ALERT_NAMES.get(a[0], "alert %d" % a[0])
+                out.append("%s: %s" % (label, name))
+        return out
 
     def read_turbo_state(self) -> Optional[str]:
         """Turbo status for display, e.g. 'Running, 76%' / 'Starting' / 'Stopped'."""

@@ -106,6 +106,35 @@ class SafetyManager:
         block on the E-stop."""
         self.assert_not_estopped()
 
+    def assert_can_stop_pumping(self) -> None:
+        """Raise unless it is safe to stop/slow the turbo. Stopping the turbo
+        auto-vents the chamber (vent is on the turbo port), so doing it while
+        the camera is cold would frost the sensor. Warm the camera first."""
+        if self.camera.is_cold:
+            raise InterlockError(
+                "Camera is cold (cooler on, sensor below %.0f C). Stopping or "
+                "standing-by the turbo auto-vents the chamber and would frost "
+                "the sensor -- warm the camera up first."
+                % self.camera.warm_target_c)
+
+    def check_pump_health(self) -> list[str]:
+        """Call periodically. Surfaces vacuum faults: a controller alert (pump
+        over-temp/over-pressure, etc.) or the turbo spinning with no backing
+        pump (it has lost its exhaust). Raises an alarm per issue and returns
+        the list (for a dedicated GUI field)."""
+        issues: list[str] = []
+        try:
+            if self.vacuum.turbo_running and not self.vacuum.backing_running:
+                issues.append(
+                    "Backing pump stopped while the turbo is spinning -- the "
+                    "turbo has lost its exhaust. Restore backing or stop the turbo.")
+            issues.extend(self.vacuum.alerts)
+        except Exception as exc:  # pragma: no cover - hardware dependent
+            log.error("Pump-health check failed: %s" % exc)
+        for msg in issues:
+            self._alarm(msg)
+        return issues
+
     def check_frost_risk(self) -> bool:
         """Call periodically. Returns True (and raises an alarm) if the sensor
         is colder than the frost-point-safe minimum for the current pressure --

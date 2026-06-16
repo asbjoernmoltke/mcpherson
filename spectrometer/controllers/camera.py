@@ -77,6 +77,17 @@ class CameraController(Controller):
         plus the safety margin. Falls as the chamber pumps down."""
         return self._frost_point() + self.cooling_margin_c
 
+    @property
+    def is_cold(self) -> bool:
+        """True when the cooler is on and the sensor is below the warm-up
+        target -- i.e. cold enough that venting/degrading vacuum risks frost.
+        Used to gate turbo-stop/standby (turbo-stop auto-vents the chamber)."""
+        try:
+            return (self.driver.is_cooler_on()
+                    and self.driver.get_temperature() < self.warm_target_c)
+        except Exception:  # pragma: no cover - hardware dependent
+            return False
+
     def is_at_frost_risk(self) -> bool:
         """True when the cooler is on and the sensor is colder than the current
         min-safe setpoint -- i.e. at/over the frost point for this pressure."""

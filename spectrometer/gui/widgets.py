@@ -114,5 +114,7 @@ class LabeledValue(QWidget):
         layout.addStretch(1)
         layout.addWidget(self._value)
 
-    def set_value(self, value: str) -> None:
+    def set_value(self, value: str, *, alert: bool = False) -> None:
         self._value.setText(value)
+        self._value.setStyleSheet(
+            "font-weight: bold; color: #d33;" if alert else "font-weight: bold;")
