@@ -47,7 +47,10 @@ class DummyVacuum(VacuumDriver):
         return self._units
 
     # --- simulated pump status + control ------------------------------
-    _STATE_NAMES = {0: "Stopped", 4: "Running", 5: "Accelerating"}
+    _STATE_NAMES = {
+        0: "Stopped", 1: "Starting", 2: "Stopping", 3: "Stopping",
+        4: "Running", 5: "Accelerating", 6: "Braking", 7: "Braking",
+    }
 
     def read_turbo_state(self) -> str:
         return self._STATE_NAMES.get(self._turbo_state, "state %d" % self._turbo_state)

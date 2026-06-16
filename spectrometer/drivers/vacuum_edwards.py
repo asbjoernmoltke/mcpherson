@@ -31,11 +31,17 @@ from .base import VacuumDriver
 # Gauge slot (1/2/3) -> TIC object id.
 GAUGE_OBJECTS = {1: 913, 2: 914, 3: 915}
 
-# Pump 'state' codes (object value field 0). Observed on hw 2026-06-10 during a
-# pump-down: turbo 0=stopped, 5=starting, 4=running (speed % ramps within
-# 'running'); backing 0=stopped, 4=running. Unknown codes shown as "state N".
-TURBO_STATE_NAMES = {0: "Stopped", 4: "Running", 5: "Starting"}
-BACKING_STATE_NAMES = {0: "Stopped", 4: "Running"}
+# Pump 'state' codes (object value field 0), full set per TIC manual §1.7.8.
+# Confirmed on hw: turbo reports 5 (start) -> 4 (running, speed % ramps within
+# 'running') -> 7 (braking, on turbo_off) -> 0 (stopped); backing 0/4. The
+# interlocks key off the CODE (0/4), so these names are display-only.
+PUMP_STATE_NAMES = {
+    0: "Stopped", 1: "Starting", 2: "Stopping", 3: "Stopping",
+    4: "Running", 5: "Accelerating", 6: "Braking", 7: "Braking",
+}
+# Kept as aliases for any external importers.
+TURBO_STATE_NAMES = PUMP_STATE_NAMES
+BACKING_STATE_NAMES = PUMP_STATE_NAMES
 
 
 class EdwardsTIC(VacuumDriver):
