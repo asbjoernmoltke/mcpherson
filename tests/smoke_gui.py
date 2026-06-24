@@ -41,8 +41,8 @@ def main() -> int:
     # Scans need a homed grating (#5) -- home before scanning.
     QTimer.singleShot(700, win.grating_panel.home_requested.emit)
     QTimer.singleShot(1300, lambda: win.acq_panel.scan_requested.emit(380.0, 520.0))
-    # Exercise the new laser controls (power / pulse-picker / rep-rate).
-    QTimer.singleShot(2100, lambda: win.laser_panel.power_changed.emit(42.0))
+    # Exercise the new laser controls (energy / pulse-picker / rep-rate).
+    QTimer.singleShot(2100, lambda: win.laser_panel.energy_changed.emit(12.0))
     QTimer.singleShot(2300, lambda: win.laser_panel.pulse_picker_changed.emit(8))
     QTimer.singleShot(2500, lambda: win.laser_panel.rep_rate_changed.emit(1.0e6))
     QTimer.singleShot(3100, win._on_estop)
@@ -51,10 +51,10 @@ def main() -> int:
     app.exec()
     win.close()
 
-    # Rep rate and pulse picker are independent controls. After power=42 %,
+    # Rep rate and pulse picker are independent controls. After energy=12 µJ,
     # pulse-picker=1/8, rep-rate=1 MHz (=1000 kHz, an allowed discrete rate):
     laser = system.devices.laser
-    laser_ok = (abs(laser.read_power_percent() - 42.0) < 1e-6
+    laser_ok = (abs(laser.read_pulse_energy_uj() - 12.0) < 1e-6
                 and laser.read_pulse_picker_ratio() == 8
                 and laser.read_repetition_rate_hz() == 1.0e6)
     system.close_all()

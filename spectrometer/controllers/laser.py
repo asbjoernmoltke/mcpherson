@@ -45,6 +45,21 @@ class LaserController(Controller):
     def read_power_percent(self) -> Optional[float]:
         return self.driver.read_power_percent()
 
+    # --- pulse energy (uJ) --------------------------------------------
+    def set_pulse_energy_uj(self, energy_uj: float) -> None:
+        self.driver.set_pulse_energy_uj(energy_uj)
+        self._notify(self.status)
+
+    def read_pulse_energy_uj(self) -> Optional[float]:
+        return self.driver.read_pulse_energy_uj()
+
+    def read_measured_pulse_energy_uj(self) -> Optional[float]:
+        return self.driver.read_measured_pulse_energy_uj()
+
+    @property
+    def max_pulse_energy_uj(self) -> Optional[float]:
+        return self.driver.max_pulse_energy_uj
+
     def set_pulse_picker_ratio(self, ratio: int) -> None:
         self.driver.set_pulse_picker_ratio(ratio)
         self._notify(self.status)
@@ -67,6 +82,10 @@ class LaserController(Controller):
     @property
     def supports_power(self) -> bool:
         return self.driver.read_power_percent() is not None
+
+    @property
+    def supports_energy(self) -> bool:
+        return self.driver.max_pulse_energy_uj is not None
 
     @property
     def supports_pulse_picker(self) -> bool:

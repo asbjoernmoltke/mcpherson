@@ -20,8 +20,13 @@ is the preferred interface. Command set (NKT-owned, from the vendor CLI ref):
 * ``ly_oxp2_dev_status`` / ``ly_oxp2_mode?``    status
 
 SAFETY: ``disable()`` (the E-stop fast path) disables the AOM output AND sets
-standby -- belt and suspenders, retried, never raises. ``open()``/``close()``
-force standby so attaching/detaching never leaves the beam on.
+standby -- belt and suspenders, retried, never raises.
+
+``open()``/``close()`` are deliberately PASSIVE: they only open/close the serial
+port (open also reads status to confirm CLI mode). They do NOT change emission,
+power, or the interface mode, so the connection can be handed off to the vendor
+software without disturbing the laser's running state. Use the explicit
+enable/disable controls (or the E-stop) to change emission.
 """
 from __future__ import annotations
 
@@ -50,10 +55,16 @@ def _all_numbers(text: str) -> list[float]:
 
 class OrigamiCLI(LaserDriver):
     def __init__(self, port: str = "COM6", *, max_pump_power_w: float = 5.0,
-                 aom_full_scale: int = 4000, timeout: float = 0.6):
+                 aom_full_scale: int = 4000,
+                 full_scale_energy_uj: float = 40.0, timeout: float = 0.6):
         self.port = port
         self.max_pump_power_w = max_pump_power_w
         self.aom_full_scale = aom_full_scale
+        # Pulse energy (uJ) at e_power == aom_full_scale. PROVISIONAL: the AOM
+        # scale is relative; this is the rep-rate-dependent spec ceiling
+        # (~40 uJ at <=100 kHz) until the power-meter calibration replaces it.
+        # The measured-energy readout (e_mlp / rep-rate) is always truthful.
+        self.full_scale_energy_uj = full_scale_energy_uj
         self.timeout = timeout
         self._ser: Optional[serial.Serial] = None
         self._lock = threading.Lock()
@@ -95,32 +106,30 @@ class OrigamiCLI(LaserDriver):
     def open(self) -> None:
         if self.is_connected:
             return
-        # Ensure the laser's serial interface is in CLI mode first (best-effort;
-        # if the mode-switch path is unavailable we still try the CLI port).
-        try:
-            from . import origami_mode
-            origami_mode.ensure_mode(self.port, "cli")
-        except Exception as exc:
-            log.error("Origami CLI mode-ensure failed (%s); opening CLI port "
-                      "anyway." % exc)
+        # Passive connect: open the CLI port and confirm the laser answers in
+        # CLI mode. We do NOT switch the interface mode or touch emission, so a
+        # running laser is left exactly as-is (and can be handed to the vendor
+        # software). If it does not answer CLI, raise rather than silently
+        # half-connecting or flipping it out of NKTPBus mode.
         self._ser = serial.Serial(
             port=self.port, baudrate=CLI_BAUD, bytesize=serial.EIGHTBITS,
             stopbits=serial.STOPBITS_ONE, rtscts=False, timeout=self.timeout)
         reply = self._txn("ly_oxp2_dev_status")
         if "ly_oxp2" not in reply:
-            log.warn("OrigamiCLI: unexpected status reply %r -- is the laser "
-                     "in CLI mode (reg 0x39=1)?" % reply)
-        self.disable()  # safety: standby + AOM off on attach
-        log.info("OrigamiCLI connected on %s; forced to standby." % self.port)
+            self._ser.close()
+            self._ser = None
+            raise RuntimeError(
+                "Origami did not answer CLI on %s (reply %r). It may be in "
+                "NKTPBus mode or in use by the vendor software. Switch it to "
+                "CLI mode (reg 0x39=1) before connecting." % (self.port, reply))
+        log.info("OrigamiCLI connected on %s (state left unchanged)." % self.port)
 
     def close(self) -> None:
+        # Passive: leave emission/power as-is; just release the port.
         if self._ser is not None:
-            try:
-                self.disable()
-            finally:
-                self._ser.close()
-                self._ser = None
-        log.info("OrigamiCLI closed.")
+            self._ser.close()
+            self._ser = None
+        log.info("OrigamiCLI closed (state left unchanged).")
 
     @property
     def is_connected(self) -> bool:
@@ -163,9 +172,9 @@ class OrigamiCLI(LaserDriver):
         reply = self._txn("ly_oxp2_mode?").strip()
         return reply or "unknown"
 
-    # --- power --------------------------------------------------------
+    # --- power / energy -----------------------------------------------
     def set_power_percent(self, percent: float) -> None:
-        """GUI power knob -> AOM relative output power (0..aom_full_scale)."""
+        """Low-level relative AOM setter (0..100 %% -> 0..aom_full_scale)."""
         percent = max(0.0, min(100.0, percent))
         raw = int(round(percent / 100.0 * self.aom_full_scale))
         self._set("e_power=%d" % raw, what="set AOM power")
@@ -174,6 +183,34 @@ class OrigamiCLI(LaserDriver):
     def read_power_percent(self) -> Optional[float]:
         raw = self._query_number("e_power?")
         return None if raw is None else raw / self.aom_full_scale * 100.0
+
+    @property
+    def max_pulse_energy_uj(self) -> Optional[float]:
+        return self.full_scale_energy_uj
+
+    def set_pulse_energy_uj(self, energy_uj: float) -> None:
+        """GUI energy knob -> AOM raw via the provisional full-scale mapping."""
+        energy_uj = max(0.0, min(self.full_scale_energy_uj, energy_uj))
+        scale = self.full_scale_energy_uj or 1.0
+        raw = int(round(energy_uj / scale * self.aom_full_scale))
+        self._set("e_power=%d" % raw, what="set pulse energy")
+        log.info("OrigamiCLI: pulse energy %.2f uJ (raw %d, provisional cal)."
+                 % (energy_uj, raw))
+
+    def read_pulse_energy_uj(self) -> Optional[float]:
+        """Energy *setpoint* implied by the AOM raw value (provisional cal)."""
+        raw = self._query_number("e_power?")
+        if raw is None:
+            return None
+        return raw / self.aom_full_scale * self.full_scale_energy_uj
+
+    def read_measured_pulse_energy_uj(self) -> Optional[float]:
+        """Measured pulse energy = measured avg power / rep rate (truthful)."""
+        watts = self.read_average_power_watts()      # e_mlp, W
+        freq = self.read_repetition_rate_hz()        # Hz
+        if watts is None or not freq:
+            return None
+        return watts / freq * 1e6                    # J -> uJ
 
     def set_pump_power_watts(self, watts: float) -> None:
         watts = max(0.0, min(self.max_pump_power_w, watts))
@@ -220,9 +257,9 @@ class OrigamiCLI(LaserDriver):
             return "Disconnected"
         try:
             parts = [self.emission_stage]
-            power = self.read_power_percent()
-            if power is not None:
-                parts.append("AOM %.0f%%" % power)
+            energy = self.read_pulse_energy_uj()
+            if energy is not None:
+                parts.append("%.1f µJ" % energy)
             rate = self.read_repetition_rate_hz()
             if rate:
                 parts.append("%.0f kHz" % (rate / 1e3))

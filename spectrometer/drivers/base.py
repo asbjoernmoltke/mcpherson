@@ -270,6 +270,23 @@ class LaserDriver(Driver):
     def read_power_percent(self) -> Optional[float]:
         return None
 
+    # Energy control (relative AOM scale expressed as pulse energy in uJ).
+    @property
+    def max_pulse_energy_uj(self) -> Optional[float]:
+        """Full-scale pulse energy in uJ, or None if energy control is N/A."""
+        return None
+
+    def set_pulse_energy_uj(self, energy_uj: float) -> None:
+        raise NotImplementedError("Energy control not supported by this laser.")
+
+    def read_pulse_energy_uj(self) -> Optional[float]:
+        """Energy setpoint (uJ) implied by the current relative AOM value."""
+        return None
+
+    def read_measured_pulse_energy_uj(self) -> Optional[float]:
+        """Measured pulse energy (uJ) = measured avg power / rep rate."""
+        return None
+
     def set_pulse_picker_ratio(self, ratio: int) -> None:
         raise NotImplementedError("Pulse picker not supported by this laser.")
 

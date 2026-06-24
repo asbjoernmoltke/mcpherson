@@ -154,6 +154,10 @@ class HardwareWorker(QObject):
                     laser=s.laser.status, laser_on=s.laser.is_enabled,
                     laser_stage=s.laser.emission_stage,
                     laser_power=s.laser.read_power_percent(),
+                    laser_energy=s.laser.read_pulse_energy_uj(),
+                    laser_energy_measured=s.laser.read_measured_pulse_energy_uj(),
+                    laser_energy_max=s.laser.max_pulse_energy_uj,
+                    laser_supports_energy=s.laser.supports_energy,
                     laser_pp_ratio=s.laser.read_pulse_picker_ratio(),
                     laser_rep_rate=s.laser.read_repetition_rate_hz(),
                     laser_supports_power=s.laser.supports_power,
@@ -163,7 +167,10 @@ class HardwareWorker(QObject):
             else:
                 snap.update(
                     laser="offline", laser_on=False, laser_stage="--",
-                    laser_power=None, laser_pp_ratio=None, laser_rep_rate=None,
+                    laser_power=None, laser_energy=None,
+                    laser_energy_measured=None, laser_energy_max=None,
+                    laser_supports_energy=False,
+                    laser_pp_ratio=None, laser_rep_rate=None,
                     laser_supports_power=False, laser_supports_pp=False,
                     laser_supports_rep=False, laser_allowed_rep_rates=None)
 
@@ -526,9 +533,9 @@ class HardwareWorker(QObject):
             self.system.laser.disable()
 
     @pyqtSlot(float)
-    def set_laser_power(self, percent: float) -> None:
+    def set_laser_energy(self, energy_uj: float) -> None:
         try:
-            self.system.laser.set_power_percent(percent)
+            self.system.laser.set_pulse_energy_uj(energy_uj)
         except Exception as exc:
             self.error.emit(str(exc))
 

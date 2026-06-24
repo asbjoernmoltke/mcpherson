@@ -112,6 +112,8 @@ def collect_metadata(system, *, extra: Optional[dict] = None) -> dict:
         "detector_size": safe(lambda: list(system.devices.camera.get_detector_size())),
         "laser_emission_stage": safe(lambda: system.laser.emission_stage),
         "laser_power_pct": safe(lambda: system.laser.read_power_percent()),
+        "laser_pulse_energy_uj": safe(lambda: system.laser.read_pulse_energy_uj()),
+        "laser_measured_energy_uj": safe(lambda: system.laser.read_measured_pulse_energy_uj()),
         "laser_rep_rate_hz": safe(lambda: system.laser.read_repetition_rate_hz()),
         "laser_pulse_picker": safe(lambda: system.laser.read_pulse_picker_ratio()),
         "vacuum_pressure": safe(lambda: system.vacuum.pressure),

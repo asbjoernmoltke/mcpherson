@@ -72,6 +72,9 @@ class FakeSerial:
             return "e_div %d" % self._state["e_div"]
         if cmd == "e_div?":
             return "e_div %d" % self._state["e_div"]
+        if cmd == "e_mlp?":
+            # Fake measured average power (W): full scale -> 4 W.
+            return "e_mlp %.3f" % (self._state["e_power"] / 4000.0 * 4.0)
         return ""
 
 
@@ -84,18 +87,46 @@ def laser(monkeypatch):
     dev.close()
 
 
-def test_open_forces_standby(laser):
+def test_open_is_passive(laser):
     fake = laser._ser
-    # open() must have queried status and then disabled (AOM off + standby)
+    # open() confirms CLI via a status query but must NOT touch emission/state,
+    # so the connection can be handed off to the vendor software untouched.
     assert "ly_oxp2_dev_status" in fake.writes
-    assert "ly_oxp2_output_disable" in fake.writes
-    assert "ly_oxp2_standby" in fake.writes
+    assert "ly_oxp2_output_disable" not in fake.writes
+    assert "ly_oxp2_standby" not in fake.writes
+    assert "ly_oxp2_enabled" not in fake.writes
+
+
+def test_close_is_passive(laser):
+    laser.enable()
+    laser._ser.writes.clear()
+    laser.close()
+    # close() just releases the port -- it must not standby/disable.
+    assert laser._ser is None  # port released
 
 
 def test_power_percent_maps_to_aom(laser):
     laser.set_power_percent(40.0)
     assert "e_power=1600" in laser._ser.writes      # 40% of 4000
     assert laser.read_power_percent() == pytest.approx(40.0)
+
+
+def test_pulse_energy_maps_to_aom(laser):
+    # Provisional cal: full scale 40 uJ at e_power=4000 -> 10 uJ = raw 1000.
+    laser.set_pulse_energy_uj(10.0)
+    assert "e_power=1000" in laser._ser.writes
+    assert laser.read_pulse_energy_uj() == pytest.approx(10.0)
+    assert laser.max_pulse_energy_uj == pytest.approx(40.0)
+    # Over-range is clamped to full scale.
+    laser.set_pulse_energy_uj(999.0)
+    assert "e_power=4000" in laser._ser.writes
+
+
+def test_measured_pulse_energy_from_power_and_rep(laser):
+    # e_power=2000 -> e_mlp 2.0 W; at 50 kHz that's 2.0/50000 = 40 uJ.
+    laser.set_pulse_energy_uj(20.0)                 # raw 2000
+    laser.set_repetition_rate_hz(50000)
+    assert laser.read_measured_pulse_energy_uj() == pytest.approx(40.0, rel=1e-3)
 
 
 def test_pulse_picker(laser):

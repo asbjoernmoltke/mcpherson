@@ -24,6 +24,7 @@ class DummyLaser(LaserDriver):
         self._connected = False
         self._stage = "off"
         self._power_pct = 0.0
+        self._full_scale_energy_uj = 40.0
         self._pulse_picker_ratio = 1
         self._rep_rate_hz = 50.0e3  # default 50 kHz
 
@@ -32,10 +33,10 @@ class DummyLaser(LaserDriver):
         log.info("DummyLaser connected.")
 
     def close(self) -> None:
-        # Fail safe: standby on disconnect.
-        self._stage = "off"
+        # Passive: leave emission state unchanged on disconnect (matches the
+        # real driver, so the connection can be handed off without disturbance).
         self._connected = False
-        log.info("DummyLaser disconnected.")
+        log.info("DummyLaser disconnected (state left unchanged).")
 
     @property
     def is_connected(self) -> bool:
@@ -70,6 +71,24 @@ class DummyLaser(LaserDriver):
 
     def read_power_percent(self) -> Optional[float]:
         return self._power_pct
+
+    @property
+    def max_pulse_energy_uj(self) -> Optional[float]:
+        return self._full_scale_energy_uj
+
+    def set_pulse_energy_uj(self, energy_uj: float) -> None:
+        energy_uj = max(0.0, min(self._full_scale_energy_uj, energy_uj))
+        self._power_pct = energy_uj / self._full_scale_energy_uj * 100.0
+        log.info("DummyLaser: pulse energy %.2f uJ." % energy_uj)
+
+    def read_pulse_energy_uj(self) -> Optional[float]:
+        return self._power_pct / 100.0 * self._full_scale_energy_uj
+
+    def read_measured_pulse_energy_uj(self) -> Optional[float]:
+        # Simulate a near-ideal measurement of the setpoint when emitting.
+        if self._stage == "off":
+            return 0.0
+        return self._power_pct / 100.0 * self._full_scale_energy_uj
 
     def set_pulse_picker_ratio(self, ratio: int) -> None:
         if ratio < 1:

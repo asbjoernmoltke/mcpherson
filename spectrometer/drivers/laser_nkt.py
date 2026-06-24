@@ -102,11 +102,15 @@ def _load_nkt(sdk_path: str):
 class NKTLaser(LaserDriver):
     def __init__(self, port: Optional[str] = None, *,
                  regmap: NKTRegisterMap = AEROPULSE_MAINBOARD,
-                 sdk_path: str = DEFAULT_SDK_PATH):
+                 sdk_path: str = DEFAULT_SDK_PATH,
+                 full_scale_energy_uj: float = 40.0):
         self.port = port
         self.regmap = regmap
         self.address = regmap.address
         self.sdk_path = sdk_path
+        # Provisional pulse energy (uJ) at 100 % of the relative power scale;
+        # calibrate against a power meter. See OrigamiCLI for the same note.
+        self.full_scale_energy_uj = full_scale_energy_uj
         self._nkt = None
         self._connected = False
 
@@ -181,19 +185,21 @@ class NKTLaser(LaserDriver):
                          % (self.regmap.module_type, self.regmap.name,
                             {a: hex(t) for a, t in modules.items()}, self.address))
         self._connected = True
-        self.disable()  # safety: never leave the beam on when attaching
-        log.info("NKTLaser connected on %s (address %d); forced to standby."
+        # Passive connect: do NOT change emission, so the connection can be
+        # handed off to the vendor software untouched. Use disable()/E-stop to
+        # change emission explicitly.
+        log.info("NKTLaser connected on %s (address %d); state left unchanged."
                  % (self.port, self.address))
 
     def close(self) -> None:
+        # Passive: leave emission as-is; just release the port.
         if self._connected:
-            self.disable()  # fail safe
             try:
                 self._nkt.closePorts(self.port or "")
             except Exception as exc:  # pragma: no cover
                 log.error("NKTLaser closePorts error: %s" % exc)
         self._connected = False
-        log.info("NKTLaser closed.")
+        log.info("NKTLaser closed (state left unchanged).")
 
     @property
     def is_connected(self) -> bool:
@@ -256,6 +262,19 @@ class NKTLaser(LaserDriver):
             return None
         raw = self._read_u16(self.regmap.power_register)
         return None if raw is None else raw * self.regmap.power_pct_per_lsb
+
+    # --- pulse energy (uJ) via the relative power scale (provisional cal) --
+    @property
+    def max_pulse_energy_uj(self) -> Optional[float]:
+        return None if self.regmap.power_register is None else self.full_scale_energy_uj
+
+    def set_pulse_energy_uj(self, energy_uj: float) -> None:
+        energy_uj = max(0.0, min(self.full_scale_energy_uj, energy_uj))
+        self.set_power_percent(energy_uj / self.full_scale_energy_uj * 100.0)
+
+    def read_pulse_energy_uj(self) -> Optional[float]:
+        pct = self.read_power_percent()
+        return None if pct is None else pct / 100.0 * self.full_scale_energy_uj
 
     # --- pulse picking / repetition rate ------------------------------
     def set_pulse_picker_ratio(self, ratio: int) -> None:
@@ -381,10 +400,13 @@ class OrigamiXPS(LaserDriver):
                          10: 1000e3}
 
     def __init__(self, port: Optional[str] = None, *,
-                 sdk_path: str = DEFAULT_SDK_PATH):
+                 sdk_path: str = DEFAULT_SDK_PATH,
+                 full_scale_energy_uj: float = 40.0):
         self.port = port
         self.address = 15
         self.sdk_path = sdk_path
+        # Provisional pulse energy (uJ) at 100 % relative power; calibrate later.
+        self.full_scale_energy_uj = full_scale_energy_uj
         self._nkt = None
         self._connected = False
 
@@ -425,14 +447,8 @@ class OrigamiXPS(LaserDriver):
     def open(self) -> None:
         if self._connected:
             return
-        # Ensure the laser's serial interface is in NKTPBus mode first
-        # (best-effort; only if we already know the port).
-        if self.port:
-            try:
-                from . import origami_mode
-                origami_mode.ensure_mode(self.port, "nktpbus")
-            except Exception as exc:
-                log.error("Origami NKTPBus mode-ensure failed: %s" % exc)
+        # Passive connect: do NOT switch the interface mode or touch emission,
+        # so a running laser can be handed to the vendor software untouched.
         nkt = self._api()
         modules = self.find_modules()
         open_ports = [p for p in nkt.getOpenPorts().split(",") if p]
@@ -449,18 +465,17 @@ class OrigamiXPS(LaserDriver):
                      "address %d." % ({a: hex(t) for a, t in modules.items()},
                                       self.address))
         self._connected = True
-        self.disable()  # safety: standby + shutter closed on attach
-        log.info("OrigamiXPS connected; forced to standby (shutter closed).")
+        log.info("OrigamiXPS connected; state left unchanged.")
 
     def close(self) -> None:
+        # Passive: leave emission as-is; just release the port.
         if self._connected:
-            self.disable()
             try:
                 self._nkt.closePorts(self.port or "")
             except Exception as exc:  # pragma: no cover
                 log.error("OrigamiXPS closePorts error: %s" % exc)
         self._connected = False
-        log.info("OrigamiXPS closed.")
+        log.info("OrigamiXPS closed (state left unchanged).")
 
     @property
     def is_connected(self) -> bool:
@@ -509,6 +524,19 @@ class OrigamiXPS(LaserDriver):
     def read_power_percent(self) -> Optional[float]:
         raw = self._rd("registerReadU16", self.REG_REL_POWER)
         return None if raw is None else raw / self.POWER_FULL_SCALE * 100.0
+
+    # --- pulse energy (uJ) via the relative power scale (provisional cal) --
+    @property
+    def max_pulse_energy_uj(self) -> Optional[float]:
+        return self.full_scale_energy_uj
+
+    def set_pulse_energy_uj(self, energy_uj: float) -> None:
+        energy_uj = max(0.0, min(self.full_scale_energy_uj, energy_uj))
+        self.set_power_percent(energy_uj / self.full_scale_energy_uj * 100.0)
+
+    def read_pulse_energy_uj(self) -> Optional[float]:
+        pct = self.read_power_percent()
+        return None if pct is None else pct / 100.0 * self.full_scale_energy_uj
 
     # --- pulse picker (U32 frequency-division factor) -----------------
     def set_pulse_picker_ratio(self, ratio: int) -> None:

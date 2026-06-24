@@ -357,7 +357,7 @@ class ShutterPanel(QGroupBox):
 
 class LaserPanel(QGroupBox):
     laser_toggled = pyqtSignal(bool)
-    power_changed = pyqtSignal(float)
+    energy_changed = pyqtSignal(float)    # pulse energy setpoint, µJ
     pulse_picker_changed = pyqtSignal(int)
     rep_rate_changed = pyqtSignal(float)  # Hz
 
@@ -377,14 +377,16 @@ class LaserPanel(QGroupBox):
         row.addWidget(self._laser_off)
         layout.addLayout(row)
 
-        # --- power / pulse-picker / rep-rate (each: spin + Apply) -----
+        # --- energy / pulse-picker / rep-rate (each: spin + Apply) -----
         grid = QGridLayout()
-        self._power = QDoubleSpinBox()
-        self._power.setRange(0.0, 100.0)
-        self._power.setSuffix(" %")
-        self._power_btn = QPushButton("Set power")
-        grid.addWidget(self._power, 0, 0)
-        grid.addWidget(self._power_btn, 0, 1)
+        self._energy = QDoubleSpinBox()
+        self._energy.setRange(0.0, 40.0)      # rescaled from laser_energy_max
+        self._energy.setDecimals(2)
+        self._energy.setSingleStep(0.1)
+        self._energy.setSuffix(" µJ")
+        self._energy_btn = QPushButton("Set energy")
+        grid.addWidget(self._energy, 0, 0)
+        grid.addWidget(self._energy_btn, 0, 1)
 
         self._pp = QSpinBox()
         self._pp.setRange(1, 1_000_000)   # 1/1 .. 1/1,000,000
@@ -402,13 +404,15 @@ class LaserPanel(QGroupBox):
         layout.addLayout(grid)
         self._rep_populated = False
 
+        self._energy_measured = LabeledValue("Measured energy")
         self._rep_actual = LabeledValue("Actual rep. rate")
+        layout.addWidget(self._energy_measured)
         layout.addWidget(self._rep_actual)
 
         self._laser_on.clicked.connect(lambda: self.laser_toggled.emit(True))
         self._laser_off.clicked.connect(lambda: self.laser_toggled.emit(False))
-        self._power_btn.clicked.connect(
-            lambda: self.power_changed.emit(self._power.value()))
+        self._energy_btn.clicked.connect(
+            lambda: self.energy_changed.emit(self._energy.value()))
         self._pp_btn.clicked.connect(
             lambda: self.pulse_picker_changed.emit(self._pp.value()))
         self._rep_btn.clicked.connect(self._emit_rep_rate)
@@ -435,8 +439,15 @@ class LaserPanel(QGroupBox):
     def update(self, s: dict) -> None:
         self._stage.set_value(s.get("laser_stage", "--"))
 
-        self._power_btn.setEnabled(s.get("laser_supports_power", False))
-        self._power.setEnabled(s.get("laser_supports_power", False))
+        supports_energy = s.get("laser_supports_energy", False)
+        self._energy_btn.setEnabled(supports_energy)
+        self._energy.setEnabled(supports_energy)
+        emax = s.get("laser_energy_max")
+        if emax and abs(self._energy.maximum() - emax) > 1e-9:
+            self._energy.setRange(0.0, float(emax))
+        meas = s.get("laser_energy_measured")
+        self._energy_measured.set_value(
+            "%.2f µJ" % meas if meas is not None else "--")
 
         pp = s.get("laser_pp_ratio")
         self._pp_btn.setEnabled(s.get("laser_supports_pp", False))

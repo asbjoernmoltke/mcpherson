@@ -39,8 +39,10 @@ independent); value format `<p>;<unit>;<state>` (parser OK). Settings updated to
 - [ ] ⚠️ **Grating identity + true dispersion + absolute λ** — all need a lamp line (or the grating's physical label). The counter test only confirmed the drive (36000 steps/rev) + mechanism direction, NOT the grating; installed is **believed 599.45 g/mm**. NB: if 599.45, the mechanical counter reads ~½ true λ (it's geared to a 1200 reference), so don't trust the counter as the absolute reference for this grating.
 
 ## Laser — controls coded; bench-verify + power calibration
+- [x] ⚙️ **Connect/disconnect is now PASSIVE** (2026-06-16): `open()`/`close()` no longer force standby or switch the interface mode — they only open/close the port (open reads status to confirm CLI; raises if the laser answers in NKTPBus / is held by the vendor software). So you can drop our connection and attach the vendor software without the laser changing state. Applies to `OrigamiCLI` **and** the Interbus `NKTLaser`/`OrigamiXPS`. Emission is changed only via the explicit enable/disable controls or the E-stop. *(Tradeoff: connecting no longer auto-safes the beam — the E-stop and Disable button remain.)*
+- [x] ⚙️ **Power control is now pulse ENERGY (µJ), not %** (2026-06-16): the GUI knob sets a pulse-energy setpoint and shows a **Measured energy** readout (`e_mlp / rep-rate`, truthful). The setpoint→AOM mapping is **PROVISIONAL**: `OrigamiCLI.full_scale_energy_uj` (default **40 µJ** at `e_power=4000`, the ≤100 kHz spec ceiling). The measured readout is always correct; only the setpoint number needs the calibration below.
 - [ ] ⚠️ Bench-verify **enable/disable** (the E-stop path) with the beam dumped
-- [ ] 🔧 **Calibrate AOM power** (`e_power` 0–4000 → actual output) against a power meter: `python tests/origami_power_test.py`
+- [ ] 🔧 **Calibrate the energy setpoint** (`e_power` 0–4000 → measured pulse energy) against a power meter, then set `full_scale_energy_uj` (likely per rep-rate): `python tests/origami_power_test.py`. Until then the µJ setpoint is approximate; trust the measured readout.
 - [ ] 🔧 Confirm **max pump power** — `OrigamiCLI(max_pump_power_w=5.0)`
 - [ ] 📋 Interbus-only unknowns (FSM RUN state, rep-index table, `0x05` scaling) — only if using the interbus path
 
