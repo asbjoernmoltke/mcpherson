@@ -406,6 +406,7 @@ class LaserPanel(QGroupBox):
         grid.addWidget(self._rep_btn, 2, 1)
         layout.addLayout(grid)
         self._rep_populated = False
+        self._inputs_synced = False   # one-time sync of input boxes per connect
 
         self._energy_measured = LabeledValue("Measured energy")
         self._rep_actual = LabeledValue("Actual rep. rate")
@@ -489,6 +490,33 @@ class LaserPanel(QGroupBox):
             self._power_req.set_value(self._fmt_power(energy * 1e-6 * actual_hz))
         else:
             self._power_req.set_value("--")
+
+        self._sync_inputs(s)
+
+    def _sync_inputs(self, s: dict) -> None:
+        """Once per connect, snap the input boxes to the laser's actual values
+        so the controls reflect the running laser (e.g. the rep-rate dropdown
+        shows the real 100 kHz, not the default). Skipped for any box the user
+        is currently editing; reset when the laser goes offline."""
+        online = s.get("laser") not in (None, "offline", "error")
+        if not online:
+            self._inputs_synced = False
+            return
+        rep_ready = (not s.get("laser_supports_rep", False)) or self._rep_populated
+        if self._inputs_synced or not rep_ready:
+            return
+        energy = s.get("laser_energy")
+        if energy is not None and not self._energy.hasFocus():
+            self._energy.setValue(float(energy))
+        pp = s.get("laser_pp_ratio")
+        if pp is not None and not self._pp.hasFocus():
+            self._pp.setValue(int(pp))
+        rate = s.get("laser_rep_rate")
+        if rate is not None and self._rep_populated and not self._rep.hasFocus():
+            idx = self._rep.findData(float(rate))
+            if idx >= 0:
+                self._rep.setCurrentIndex(idx)
+        self._inputs_synced = True
 
 
 class AcquisitionPanel(QGroupBox):
