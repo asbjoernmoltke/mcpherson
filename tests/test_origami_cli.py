@@ -15,13 +15,15 @@ from spectrometer.drivers.laser_origami_cli import OrigamiCLI
 class FakeSerial:
     """Minimal serial stand-in that canned-replies to OXPS CLI commands."""
 
+    # Index -> Hz, mirroring the real e_freq_available? reply.
+    RATES = {0: 50000, 1: 100000, 2: 200000, 3: 300000, 4: 1000000}
+
     def __init__(self, **kwargs):
         self.is_open = True
         self.writes: list[str] = []
         self._out = b""
-        # remembered setpoints so queries echo them back
-        self._state = {"e_power": 0, "e_freq": 50000, "e_div": 1,
-                       "mode": "standby"}
+        # remembered setpoints so queries echo them back (e_freq is an INDEX)
+        self._state = {"e_power": 0, "e_freq": 0, "e_div": 1, "mode": "standby"}
 
     def reset_input_buffer(self):
         self._out = b""
@@ -29,7 +31,8 @@ class FakeSerial:
     def write(self, data: bytes):
         cmd = data.decode("ascii").strip()
         self.writes.append(cmd)
-        self._out = (self._reply(cmd) + "\n").encode("ascii")
+        # The real firmware echoes the command, then the verbose answer.
+        self._out = (cmd + "\n" + self._reply(cmd) + "\n").encode("ascii")
 
     @property
     def in_waiting(self) -> int:
@@ -44,37 +47,42 @@ class FakeSerial:
 
     def _reply(self, cmd: str) -> str:
         if cmd == "ly_oxp2_dev_status":
-            return "ly_oxp2_dev_status OK"
+            return "ly_oxp2_dev_status 129"
         if cmd == "ly_oxp2_enabled":
             self._state["mode"] = "enabled"
-            return "ly_oxp2_enabled"
+            return "OK"
         if cmd == "ly_oxp2_standby":
             self._state["mode"] = "standby"
-            return "ly_oxp2_standby"
+            return "OK"
         if cmd in ("ly_oxp2_output_enable", "ly_oxp2_output_disable"):
-            return cmd
+            return "OK"
         if cmd == "ly_oxp2_mode?":
-            return self._state["mode"]
+            return ("Laser status: ON enabled state"
+                    if self._state["mode"] == "enabled"
+                    else "Laser status: standby")
         if cmd == "e_freq_available?":
-            return "e_freq_available 50000 100000 200000 300000 1000000"
+            lines = ["Available repetition rates:"]
+            for i in sorted(self.RATES):
+                lines.append("\t e_freq=%d\t--> %d Hz" % (i, self.RATES[i]))
+            return "\n".join(lines)
         if cmd.startswith("e_power="):
             self._state["e_power"] = int(cmd.split("=")[1])
-            return "e_power %d" % self._state["e_power"]
+            return "OK"
         if cmd == "e_power?":
-            return "e_power %d" % self._state["e_power"]
+            return "Setted laser power in relative unit: %d" % self._state["e_power"]
         if cmd.startswith("e_freq="):
             self._state["e_freq"] = int(cmd.split("=")[1])
-            return "e_freq %d" % self._state["e_freq"]
+            return "OK"
         if cmd == "e_freq?":
-            return "%d" % self._state["e_freq"]
+            return "Frequency index parameter: %d" % self._state["e_freq"]
         if cmd.startswith("e_div="):
             self._state["e_div"] = int(cmd.split("=")[1])
-            return "e_div %d" % self._state["e_div"]
+            return "OK"
         if cmd == "e_div?":
-            return "e_div %d" % self._state["e_div"]
+            return "Notice: Division factor is %d" % self._state["e_div"]
         if cmd == "e_mlp?":
-            # Fake measured average power (W): full scale -> 4 W.
-            return "e_mlp %.3f" % (self._state["e_power"] / 4000.0 * 4.0)
+            # Measured average power in mW; full AOM scale -> 4000 mW (4 W).
+            return "%d mW" % self._state["e_power"]
         return ""
 
 
@@ -135,12 +143,12 @@ def test_pulse_picker(laser):
     assert laser.read_pulse_picker_ratio() == 8
 
 
-def test_rep_rate_uses_queried_allowed_list(laser):
+def test_rep_rate_uses_queried_index_map(laser):
     allowed = laser.allowed_rep_rates_hz()
     assert allowed == (50000, 100000, 200000, 300000, 1000000)
-    applied = laser.set_repetition_rate_hz(95000)   # nearest -> 100000
+    applied = laser.set_repetition_rate_hz(95000)   # nearest -> 100000 (index 1)
     assert applied == 100000
-    assert "e_freq=100000" in laser._ser.writes
+    assert "e_freq=1" in laser._ser.writes          # sends the INDEX, not Hz
     assert laser.read_repetition_rate_hz() == 100000
 
 

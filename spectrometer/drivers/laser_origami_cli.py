@@ -53,6 +53,13 @@ def _all_numbers(text: str) -> list[float]:
             re.findall(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", text)]
 
 
+def _last_number(text: str) -> Optional[float]:
+    """The firmware answers are verbose ('... is 4', 'relative unit: 0', '20
+    mW') -- the value is the LAST number, which avoids label/echo digits."""
+    nums = _all_numbers(text)
+    return nums[-1] if nums else None
+
+
 class OrigamiCLI(LaserDriver):
     def __init__(self, port: str = "COM6", *, max_pump_power_w: float = 5.0,
                  aom_full_scale: int = 4000,
@@ -69,6 +76,7 @@ class OrigamiCLI(LaserDriver):
         self._ser: Optional[serial.Serial] = None
         self._lock = threading.Lock()
         self._allowed_rep_rates: Optional[tuple[float, ...]] = None
+        self._rep_rate_index_hz: Optional[dict[int, float]] = None
 
     # --- serial transaction -------------------------------------------
     def _txn(self, cmd: str) -> str:
@@ -91,6 +99,11 @@ class OrigamiCLI(LaserDriver):
                 else:
                     time.sleep(0.02)
         reply = buf.decode("ascii", errors="replace").strip()
+        # The firmware echoes the command on the first line; drop it so callers
+        # parse only the answer (e.g. 'e_freq?\nFrequency index parameter: 0').
+        lines = reply.split("\n")
+        if lines and lines[0].strip() == cmd.strip():
+            reply = "\n".join(lines[1:]).strip()
         log.debug("OrigamiCLI %s -> %r" % (cmd, reply))
         return reply
 
@@ -100,7 +113,7 @@ class OrigamiCLI(LaserDriver):
             log.warn("OrigamiCLI %s: no reply." % what)
 
     def _query_number(self, cmd: str) -> Optional[float]:
-        return _first_number(self._txn(cmd))
+        return _last_number(self._txn(cmd))
 
     # --- lifecycle ----------------------------------------------------
     def open(self) -> None:
@@ -169,7 +182,8 @@ class OrigamiCLI(LaserDriver):
 
     @property
     def emission_stage(self) -> str:
-        reply = self._txn("ly_oxp2_mode?").strip()
+        # Reply e.g. 'Laser status: ON enabled state' -> 'ON enabled state'.
+        reply = self._txn("ly_oxp2_mode?").replace("Laser status:", "").strip()
         return reply or "unknown"
 
     # --- power / energy -----------------------------------------------
@@ -216,11 +230,19 @@ class OrigamiCLI(LaserDriver):
         watts = max(0.0, min(self.max_pump_power_w, watts))
         self._set("ly_oxp2_power=%g" % watts, what="set pump power")
 
+    @staticmethod
+    def _watts_from_reply(reply: str) -> Optional[float]:
+        """Parse a power reply, honouring its unit ('20 mW' -> 0.020 W)."""
+        val = _last_number(reply)
+        if val is None:
+            return None
+        return val / 1000.0 if "mw" in reply.lower() else val
+
     def read_pump_power_watts(self) -> Optional[float]:
-        return self._query_number("ly_oxp2_power?")
+        return self._watts_from_reply(self._txn("ly_oxp2_power?"))
 
     def read_average_power_watts(self) -> Optional[float]:
-        return self._query_number("e_mlp?")
+        return self._watts_from_reply(self._txn("e_mlp?"))
 
     # --- pulse picker -------------------------------------------------
     def set_pulse_picker_ratio(self, ratio: int) -> None:
@@ -233,23 +255,36 @@ class OrigamiCLI(LaserDriver):
         return None if val is None else int(val)
 
     # --- repetition rate ----------------------------------------------
+    # e_freq is a discrete INDEX, not a Hz value. e_freq_available? returns the
+    # index->Hz map, e.g. 'e_freq=0\t--> 50000 Hz'. e_freq? returns the current
+    # index; set e_freq=<index>.
+    def _rep_rate_map(self) -> dict[int, float]:
+        if self._rep_rate_index_hz is None:
+            reply = self._txn("e_freq_available?")
+            pairs = re.findall(r"e_freq\s*=\s*(\d+)\s*-+>\s*(\d+)\s*Hz", reply)
+            self._rep_rate_index_hz = {int(i): float(hz) for i, hz in pairs}
+        return self._rep_rate_index_hz
+
     def allowed_rep_rates_hz(self) -> Optional[tuple[float, ...]]:
         if self._allowed_rep_rates is None:
-            nums = _all_numbers(self._txn("e_freq_available?"))
-            # Keep plausible rep-rate values (Hz); ignore stray small ints.
-            rates = sorted({n for n in nums if n >= 1000.0})
+            rates = sorted(self._rep_rate_map().values())
             self._allowed_rep_rates = tuple(rates) if rates else None
         return self._allowed_rep_rates
 
     def set_repetition_rate_hz(self, target_hz: float) -> float:
-        allowed = self.allowed_rep_rates_hz()
-        applied = (min(allowed, key=lambda r: abs(r - target_hz))
-                   if allowed else float(target_hz))
-        self._set("e_freq=%d" % int(round(applied)), what="set rep rate")
-        return applied
+        rate_map = self._rep_rate_map()
+        if not rate_map:
+            self._set("e_freq=%d" % int(round(target_hz)), what="set rep rate")
+            return float(target_hz)
+        index = min(rate_map, key=lambda i: abs(rate_map[i] - target_hz))
+        self._set("e_freq=%d" % index, what="set rep rate")
+        return rate_map[index]
 
     def read_repetition_rate_hz(self) -> Optional[float]:
-        return self._query_number("e_freq?")
+        index = self._query_number("e_freq?")     # current index, not Hz
+        if index is None:
+            return None
+        return self._rep_rate_map().get(int(index))
 
     # --- status -------------------------------------------------------
     def get_status(self) -> str:
