@@ -153,6 +153,8 @@ class HardwareWorker(QObject):
                 snap.update(
                     laser=s.laser.status, laser_on=s.laser.is_enabled,
                     laser_stage=s.laser.emission_stage,
+                    laser_state=s.laser.emission_state,
+                    laser_supports_listen=s.laser.supports_listen,
                     laser_power=s.laser.read_power_percent(),
                     laser_energy=s.laser.read_pulse_energy_uj(),
                     laser_energy_measured=s.laser.read_measured_pulse_energy_uj(),
@@ -167,6 +169,7 @@ class HardwareWorker(QObject):
             else:
                 snap.update(
                     laser="offline", laser_on=False, laser_stage="--",
+                    laser_state="--", laser_supports_listen=False,
                     laser_power=None, laser_energy=None,
                     laser_energy_measured=None, laser_energy_max=None,
                     laser_supports_energy=False,
@@ -531,6 +534,13 @@ class HardwareWorker(QObject):
             self.system.laser.enable()
         else:
             self.system.laser.disable()
+
+    @pyqtSlot()
+    def set_laser_listen(self) -> None:
+        try:
+            self.system.laser.listen()
+        except Exception as exc:
+            self.error.emit(str(exc))
 
     @pyqtSlot(float)
     def set_laser_energy(self, energy_uj: float) -> None:

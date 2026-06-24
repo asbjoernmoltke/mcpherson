@@ -54,12 +54,16 @@ class FakeSerial:
         if cmd == "ly_oxp2_standby":
             self._state["mode"] = "standby"
             return "OK"
+        if cmd == "ly_oxp2_listen":
+            self._state["mode"] = "listen"
+            return "OK"
         if cmd in ("ly_oxp2_output_enable", "ly_oxp2_output_disable"):
             return "OK"
         if cmd == "ly_oxp2_mode?":
-            return ("Laser status: ON enabled state"
-                    if self._state["mode"] == "enabled"
-                    else "Laser status: standby")
+            return {"enabled": "Laser status: ON enabled state",
+                    "standby": "Laser status: standby",
+                    "listen": "Laser status: listen"}.get(
+                        self._state["mode"], "Laser status: standby")
         if cmd == "e_freq_available?":
             lines = ["Available repetition rates:"]
             for i in sorted(self.RATES):
@@ -150,6 +154,18 @@ def test_rep_rate_uses_queried_index_map(laser):
     assert applied == 100000
     assert "e_freq=1" in laser._ser.writes          # sends the INDEX, not Hz
     assert laser.read_repetition_rate_hz() == 100000
+
+
+def test_listen_state(laser):
+    assert laser.supports_listen
+    laser.enable()
+    assert laser.emission_state == "on"
+    laser.listen()
+    assert "ly_oxp2_listen" in laser._ser.writes
+    assert laser.emission_state == "listen"
+    assert laser.is_enabled is False        # listen is not emitting
+    laser.disable()
+    assert laser.emission_state == "standby"
 
 
 def test_enable_then_estop_disable(laser):

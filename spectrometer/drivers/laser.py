@@ -56,13 +56,25 @@ class DummyLaser(LaserDriver):
         self._stage = "off"
         log.info("DummyLaser: DISABLED (standby).")
 
+    supports_listen = True
+
+    def listen(self) -> None:
+        self._stage = "listen"
+        log.info("DummyLaser: listen state.")
+
     @property
     def is_enabled(self) -> bool:
-        return self._stage != "off"
+        return self._stage not in ("off", "listen")
 
     @property
     def emission_stage(self) -> str:
         return self._stage
+
+    @property
+    def emission_state(self) -> str:
+        if self._stage == "listen":
+            return "listen"
+        return "on" if self.is_enabled else "standby"
 
     # --- power / pulse picker / rep rate ------------------------------
     def set_power_percent(self, percent: float) -> None:

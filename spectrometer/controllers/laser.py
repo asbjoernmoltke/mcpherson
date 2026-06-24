@@ -29,6 +29,11 @@ class LaserController(Controller):
         self.driver.disable()
         self._notify(self.status)
 
+    def listen(self) -> None:
+        """Return the laser to its 'listen' (armed, not emitting) state."""
+        self.driver.listen()
+        self._notify(self.status)
+
     @property
     def is_enabled(self) -> bool:
         return self.driver.is_enabled
@@ -36,6 +41,14 @@ class LaserController(Controller):
     @property
     def emission_stage(self) -> str:
         return self.driver.emission_stage
+
+    @property
+    def emission_state(self) -> str:
+        return self.driver.emission_state
+
+    @property
+    def supports_listen(self) -> bool:
+        return self.driver.supports_listen
 
     # --- power / pulse picker / rep rate (pass-throughs) --------------
     def set_power_percent(self, percent: float) -> None:

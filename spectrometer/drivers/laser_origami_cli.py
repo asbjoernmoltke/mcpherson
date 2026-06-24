@@ -154,6 +154,13 @@ class OrigamiCLI(LaserDriver):
         self._set("ly_oxp2_output_enable", what="AOM enable")
         log.info("OrigamiCLI: emission enabled + AOM open.")
 
+    supports_listen = True
+
+    def listen(self) -> None:
+        """Return to the 'listen' state (seed running, not emitting)."""
+        self._set("ly_oxp2_listen", what="listen")
+        log.info("OrigamiCLI: listen state requested.")
+
     def disable(self) -> None:
         """E-stop fast path: AOM off first, then standby. Retried; never raises."""
         for attempt in range(3):
@@ -185,6 +192,18 @@ class OrigamiCLI(LaserDriver):
         # Reply e.g. 'Laser status: ON enabled state' -> 'ON enabled state'.
         reply = self._txn("ly_oxp2_mode?").replace("Laser status:", "").strip()
         return reply or "unknown"
+
+    @property
+    def emission_state(self) -> str:
+        """Normalised state for the GUI: 'on' | 'standby' | 'listen'."""
+        r = self._txn("ly_oxp2_mode?").lower()
+        if "listen" in r:
+            return "listen"
+        if "standby" in r:
+            return "standby"
+        if "enabl" in r or "emiss" in r or " on" in r or r.startswith("on"):
+            return "on"
+        return "unknown"
 
     # --- power / energy -----------------------------------------------
     def set_power_percent(self, percent: float) -> None:

@@ -264,6 +264,18 @@ class LaserDriver(Driver):
         """'off' | 'seed' | 'preamp' | 'booster' (default: on/off only)."""
         return "booster" if self.is_enabled else "off"
 
+    # Normalised emission state for the GUI: 'on' | 'standby' | 'listen' |
+    # 'unknown'. Lasers with a distinct listen/standby state override this.
+    supports_listen: bool = False
+
+    @property
+    def emission_state(self) -> str:
+        return "on" if self.is_enabled else "standby"
+
+    def listen(self) -> None:
+        """Put the laser into its 'listen' (armed-but-not-emitting) state."""
+        raise NotImplementedError("Listen state not supported by this laser.")
+
     def set_power_percent(self, percent: float) -> None:
         raise NotImplementedError("Power control not supported by this laser.")
 

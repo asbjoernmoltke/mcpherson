@@ -357,6 +357,7 @@ class ShutterPanel(QGroupBox):
 
 class LaserPanel(QGroupBox):
     laser_toggled = pyqtSignal(bool)
+    listen_requested = pyqtSignal()
     energy_changed = pyqtSignal(float)    # pulse energy setpoint, µJ
     pulse_picker_changed = pyqtSignal(int)
     rep_rate_changed = pyqtSignal(float)  # Hz
@@ -367,13 +368,15 @@ class LaserPanel(QGroupBox):
         self.conn = ConnectionBar("laser", "Laser")
         self.connection_bars = [self.conn]
         layout.addWidget(self.conn)
-        self._stage = LabeledValue("Emission stage")
+        self._stage = LabeledValue("State")
         layout.addWidget(self._stage)
 
         row = QHBoxLayout()
         self._laser_on = QPushButton("Enable laser")
+        self._laser_listen = QPushButton("Listen")
         self._laser_off = QPushButton("Disable laser")
         row.addWidget(self._laser_on)
+        row.addWidget(self._laser_listen)
         row.addWidget(self._laser_off)
         layout.addLayout(row)
 
@@ -413,6 +416,7 @@ class LaserPanel(QGroupBox):
 
         self._laser_on.clicked.connect(lambda: self.laser_toggled.emit(True))
         self._laser_off.clicked.connect(lambda: self.laser_toggled.emit(False))
+        self._laser_listen.clicked.connect(self.listen_requested.emit)
         self._energy_btn.clicked.connect(
             lambda: self.energy_changed.emit(self._energy.value()))
         self._pp_btn.clicked.connect(
@@ -447,7 +451,8 @@ class LaserPanel(QGroupBox):
         return f"{watts * 1e6:.0f} µW"
 
     def update(self, s: dict) -> None:
-        self._stage.set_value(s.get("laser_stage", "--"))
+        self._stage.set_value(s.get("laser_state", "--"))
+        self._laser_listen.setEnabled(s.get("laser_supports_listen", False))
 
         supports_energy = s.get("laser_supports_energy", False)
         self._energy_btn.setEnabled(supports_energy)
