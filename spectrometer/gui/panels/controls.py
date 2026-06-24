@@ -406,8 +406,10 @@ class LaserPanel(QGroupBox):
 
         self._energy_measured = LabeledValue("Measured energy")
         self._rep_actual = LabeledValue("Actual rep. rate")
+        self._power_req = LabeledValue("Requested avg. power")
         layout.addWidget(self._energy_measured)
         layout.addWidget(self._rep_actual)
+        layout.addWidget(self._power_req)
 
         self._laser_on.clicked.connect(lambda: self.laser_toggled.emit(True))
         self._laser_off.clicked.connect(lambda: self.laser_toggled.emit(False))
@@ -436,6 +438,14 @@ class LaserPanel(QGroupBox):
             return f"{hz / 1e3:.3f} kHz"
         return f"{hz:.1f} Hz"
 
+    @staticmethod
+    def _fmt_power(watts: float) -> str:
+        if watts >= 1.0:
+            return f"{watts:.2f} W"
+        if watts >= 1e-3:
+            return f"{watts * 1e3:.1f} mW"
+        return f"{watts * 1e6:.0f} µW"
+
     def update(self, s: dict) -> None:
         self._stage.set_value(s.get("laser_stage", "--"))
 
@@ -459,9 +469,21 @@ class LaserPanel(QGroupBox):
             self._populate_rep_rates(allowed)
         self._rep_btn.setEnabled(supports_rep and self._rep_populated)
         self._rep.setEnabled(supports_rep and self._rep_populated)
+        # Actual output rep rate = base (seed) rate / pulse-picker ratio. The
+        # picker "1/N" divides the seed rate, so output = rate / N (CLI reports
+        # the seed rate in e_freq; the picker is separate in e_div).
         rate = s.get("laser_rep_rate")
+        ratio = pp if pp else 1
+        actual_hz = (rate / ratio) if rate else None
         self._rep_actual.set_value(
-            self._fmt_rate(rate) if rate else ("1/%d" % pp if pp else "--"))
+            self._fmt_rate(actual_hz) if actual_hz else "--")
+
+        # Requested average power = energy setpoint x actual output rep rate.
+        energy = s.get("laser_energy")
+        if energy is not None and actual_hz:
+            self._power_req.set_value(self._fmt_power(energy * 1e-6 * actual_hz))
+        else:
+            self._power_req.set_value("--")
 
 
 class AcquisitionPanel(QGroupBox):
