@@ -71,6 +71,28 @@ class CameraController(Controller):
         self._abort = abort or threading.Event()
         self.last_frame_saturated = False
 
+    # --- cooling fan (manual) -----------------------------------------
+    @property
+    def fan_on(self) -> bool:
+        try:
+            return self.driver.get_fan_mode() != "off"
+        except Exception:  # pragma: no cover - hardware dependent
+            return False
+
+    def set_fan(self, on: bool) -> None:
+        """Manually run the cooling fan -- e.g. to stop the head warming during
+        room-temperature acquisition (the fan is otherwise only turned on by
+        ``cooldown``). Refuses to switch the fan OFF while the cooler is on: the
+        thermo-electric cooler needs the fan to dump its heat."""
+        if not on and self.driver.is_cooler_on():
+            raise InterlockError(
+                "Refusing to turn the fan off while the cooler is on -- the "
+                "thermo-electric cooler needs the fan to dissipate heat. Warm "
+                "the camera up first.")
+        self.driver.set_fan_mode("full" if on else "off")
+        log.info("CameraController: fan %s." % ("ON (full)" if on else "off"))
+        self._notify(self.status)
+
     # --- frost-point interlock ----------------------------------------
     def min_safe_setpoint_c(self) -> float:
         """Coldest setpoint allowed at the current pressure: the frost point

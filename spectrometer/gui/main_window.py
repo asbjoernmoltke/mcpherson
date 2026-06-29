@@ -23,6 +23,7 @@ class MainWindow(QMainWindow):
     # GUI-thread -> worker-thread (queued) triggers
     _cooldown = pyqtSignal(float)
     _warmup = pyqtSignal()
+    _camera_fan = pyqtSignal(bool)
     _home = pyqtSignal()
     _goto = pyqtSignal(float)
     _grating = pyqtSignal(str)
@@ -147,6 +148,7 @@ class MainWindow(QMainWindow):
         # GUI -> worker (queued across threads)
         self._cooldown.connect(w.do_cooldown)
         self._warmup.connect(w.do_warmup)
+        self._camera_fan.connect(w.set_camera_fan)
         self._home.connect(w.do_home)
         self._goto.connect(w.do_goto_wavelength)
         self._grating.connect(w.set_grating)
@@ -174,6 +176,7 @@ class MainWindow(QMainWindow):
         # panels -> local re-emit (so emission happens on the GUI thread)
         self.camera_panel.cooldown_requested.connect(self._cooldown.emit)
         self.camera_panel.warmup_requested.connect(self._warmup.emit)
+        self.camera_panel.fan_toggled.connect(self._camera_fan.emit)
         self.camera_panel.exposure_changed.connect(self._exposure.emit)
         self.camera_panel.trigger_changed.connect(self._trigger.emit)
         self.camera_panel.internal_shutter_changed.connect(self._internal_shutter.emit)

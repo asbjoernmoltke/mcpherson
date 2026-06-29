@@ -8,9 +8,9 @@ directly.
 from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtWidgets import (QComboBox, QDoubleSpinBox, QGridLayout, QGroupBox,
-                             QHBoxLayout, QLabel, QProgressBar, QPushButton,
-                             QSpinBox, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QGridLayout,
+                             QGroupBox, QHBoxLayout, QLabel, QProgressBar,
+                             QPushButton, QSpinBox, QVBoxLayout, QWidget)
 
 from ..widgets import ConnectionBar, LabeledValue, StatusLamp
 
@@ -22,6 +22,7 @@ def _lamp_state(ok: bool) -> str:
 class CameraPanel(QGroupBox):
     cooldown_requested = pyqtSignal(float)
     warmup_requested = pyqtSignal()
+    fan_toggled = pyqtSignal(bool)
     exposure_changed = pyqtSignal(float)
     trigger_changed = pyqtSignal(str)
     internal_shutter_changed = pyqtSignal(str)
@@ -63,12 +64,17 @@ class CameraPanel(QGroupBox):
         grid.addWidget(self._cool_btn, 0, 1)
         grid.addWidget(self._warm_btn, 1, 0, 1, 2)
 
+        # Manual cooling fan -- run it to stop the head warming during
+        # room-temperature acquisition (independent of the cooler).
+        self._fan = QCheckBox("Cooling fan (run to limit warming)")
+        grid.addWidget(self._fan, 2, 0, 1, 2)
+
         self._exposure = QDoubleSpinBox()
         self._exposure.setRange(0.0001, 600.0)
         self._exposure.setDecimals(4)
         self._exposure.setValue(0.1)
         self._exposure.setSuffix(" s exposure")
-        grid.addWidget(self._exposure, 2, 0, 1, 2)
+        grid.addWidget(self._exposure, 3, 0, 1, 2)
         layout.addLayout(grid)
 
         # --- acquisition configuration (populated from camera caps) ----
@@ -95,6 +101,9 @@ class CameraPanel(QGroupBox):
         self._cool_btn.clicked.connect(
             lambda: self.cooldown_requested.emit(self._setpoint.value()))
         self._warm_btn.clicked.connect(self.warmup_requested.emit)
+        # clicked() fires only on user action, so reflecting state in update()
+        # via setChecked() won't loop back.
+        self._fan.clicked.connect(self.fan_toggled.emit)
         self._exposure.valueChanged.connect(self.exposure_changed.emit)
         self._trigger.currentTextChanged.connect(self.trigger_changed.emit)
         self._shutter.currentTextChanged.connect(self.internal_shutter_changed.emit)
@@ -158,6 +167,9 @@ class CameraPanel(QGroupBox):
         # Informational only -- "warn" (amber) when not cooled, since you can
         # still acquire, just with higher shot noise.
         self._cooled.set_state("ok" if s.get("cooled") else "warn")
+        online = s.get("camera") not in (None, "offline", "error")
+        self._fan.setEnabled(online)
+        self._fan.setChecked(bool(s.get("camera_fan_on")))
         self._update_progress(s)
 
     def _update_progress(self, s: dict) -> None:

@@ -87,6 +87,45 @@ def test_cooldown_cancels_pending_warmup(qapp):
         sys.close_all()
 
 
+# --- manual cooling fan -----------------------------------------------
+def test_fan_can_be_run_at_room_temperature():
+    drv = DummyCamera()
+    cam = CameraController(drv, frost_point=lambda: -100.0)
+    drv.set_fan_mode("off")
+    assert not cam.fan_on
+    cam.set_fan(True)                                # turn the fan on, no cooler
+    assert cam.fan_on and drv.get_fan_mode() == "full"
+    cam.set_fan(False)                               # allowed while cooler off
+    assert not cam.fan_on
+
+
+def test_fan_off_refused_while_cooler_on(qapp):
+    from spectrometer.core.exceptions import InterlockError
+    sys = _cooled_system()
+    try:
+        sys.camera.cooldown(-80.0)                   # cooler on
+        assert sys.devices.camera.is_cooler_on()
+        with pytest.raises(InterlockError):
+            sys.camera.set_fan(False)                # must keep dumping heat
+        assert sys.camera.fan_on                     # still on
+    finally:
+        sys.close_all()
+
+
+def test_worker_fan_slot_and_snapshot(qapp):
+    sys = _cooled_system()
+    try:
+        w = _worker(sys)
+        snaps: list[dict] = []
+        w.status_updated.connect(snaps.append)
+        sys.devices.camera.set_fan_mode("off")
+        w.set_camera_fan(True)
+        assert snaps[-1]["camera_fan_on"] is True
+        assert sys.devices.camera.get_fan_mode() == "full"
+    finally:
+        sys.close_all()
+
+
 # --- config pass-through + capability discovery -----------------------
 def test_capabilities_lists_options_for_dummy():
     cam = CameraController(DummyCamera(), frost_point=lambda: -100.0)

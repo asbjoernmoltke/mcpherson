@@ -130,11 +130,12 @@ class HardwareWorker(QObject):
                     cooler_on=d.camera.is_cooler_on(),
                     stable=d.camera.is_temperature_stable(),
                     cooled=s.camera.is_cooled,
+                    camera_fan_on=s.camera.fan_on,
                     cool_progress=s.camera.cooldown_progress())
             else:
                 snap.update(camera="offline", temperature=float("nan"),
                             cooler_on=False, stable=False, cooled=False,
-                            cool_progress=0.0)
+                            camera_fan_on=False, cool_progress=0.0)
             # acquisition needs the camera connected (and no e-stop/abort)
             snap["can_acquire"] = conn["camera"] and s.safety.can_acquire
 
@@ -452,6 +453,14 @@ class HardwareWorker(QObject):
     @pyqtSlot(float)
     def set_exposure(self, seconds: float) -> None:
         self.system.camera.configure(exposure_s=seconds)
+
+    @pyqtSlot(bool)
+    def set_camera_fan(self, on: bool) -> None:
+        try:
+            self.system.camera.set_fan(on)
+        except Exception as exc:
+            self.error.emit(str(exc))
+        self._poll_status()
 
     @pyqtSlot(str)
     def set_trigger_mode(self, mode: str) -> None:
