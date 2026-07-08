@@ -33,13 +33,20 @@ def run_gui(dummy: bool = False) -> int:
     finally:
         # Persist settings (the window updates them from the live UI on close).
         settings.save()
-        # Always attempt a safe shutdown: warm the camera before the cooler
-        # is cut, then release all devices.
-        log.info("Shutting down: safe camera warm-up then close devices.")
-        try:
-            if system.devices.camera.is_cooler_on():
-                system.camera.safe_shutdown()
-        except Exception as exc:  # pragma: no cover
-            log.error("Safe shutdown error: %s" % exc)
+        # The close dialog (MainWindow._ask_shutdown_disposition) lets the
+        # user skip the camera warm-up to relaunch quickly with the cooler
+        # and vacuum pump left running (e.g. after an accidental E-stop).
+        if getattr(window, "leave_equipment_running", False):
+            log.info("Shutting down: leaving equipment running as chosen at "
+                     "close (camera warm-up skipped).")
+        else:
+            log.info("Shutting down: safe camera warm-up then close devices.")
+            try:
+                if system.devices.camera.is_cooler_on():
+                    system.camera.safe_shutdown()
+            except Exception as exc:  # pragma: no cover
+                log.error("Safe shutdown error: %s" % exc)
+        # Unconditional either way -- just releases serial/SDK handles, does
+        # not touch cooler/pump/laser state (every driver's close() is passive).
         system.close_all()
         log.finish()
