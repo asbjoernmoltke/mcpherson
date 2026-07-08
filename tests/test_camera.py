@@ -20,8 +20,8 @@ def qapp():
 
 
 def _worker(system):
-    from spectrometer.gui.worker import HardwareWorker
-    return HardwareWorker(system)
+    from spectrometer.gui.worker import AcquisitionWorker
+    return AcquisitionWorker(system)
 
 
 def _cooled_system():

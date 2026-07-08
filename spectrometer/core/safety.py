@@ -109,8 +109,13 @@ class SafetyManager:
     def assert_can_stop_pumping(self) -> None:
         """Raise unless it is safe to stop/slow the turbo. Stopping the turbo
         auto-vents the chamber (vent is on the turbo port), so doing it while
-        the camera is cold would frost the sensor. Warm the camera first."""
-        if self.camera.is_cold:
+        the camera is cold would frost the sensor. Warm the camera first.
+
+        Reads the *cached* cold flag rather than the camera driver directly:
+        this is called from the vacuum/laser worker thread, which doesn't own
+        the (thread-confined) camera driver -- the acquisition thread
+        refreshes the cache once per poll cycle instead."""
+        if self.camera.is_cold_cached:
             raise InterlockError(
                 "Camera is cold (cooler on, sensor below %.0f C). Stopping or "
                 "standing-by the turbo auto-vents the chamber and would frost "

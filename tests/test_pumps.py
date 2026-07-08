@@ -78,10 +78,15 @@ def test_turbo_stop_blocked_while_camera_cold():
         cam._setpoint = -45.0
         cam._temp = -45.0
         assert s.camera.is_cold
+        # assert_can_stop_pumping reads the cached flag (it's called from the
+        # Aux thread, which doesn't own the camera driver) -- the real
+        # AcquisitionWorker poll refreshes this once per cycle.
+        s.camera.refresh_cold_cache()
         with pytest.raises(InterlockError):
             s.safety.assert_can_stop_pumping()  # turbo-stop auto-vents -> frost
         cam.set_cooler(False)                   # warm/cooler off -> allowed
         assert not s.camera.is_cold
+        s.camera.refresh_cold_cache()
         s.safety.assert_can_stop_pumping()      # no raise
     finally:
         s.close_all()
@@ -104,8 +109,8 @@ def test_pump_alerts_surface_in_health_and_snapshot(qapp):
         assert "Turbo: Temp Alert" in s.vacuum.alerts
         assert "Turbo: Temp Alert" in s.safety.check_pump_health()
 
-        from spectrometer.gui.worker import HardwareWorker
-        w = HardwareWorker(s)
+        from spectrometer.gui.aux_worker import AuxWorker
+        w = AuxWorker(s)
         snaps: list[dict] = []
         w.status_updated.connect(snaps.append)
         w._poll_status()
@@ -117,8 +122,8 @@ def test_pump_alerts_surface_in_health_and_snapshot(qapp):
 def test_worker_pump_slots_and_snapshot(qapp):
     s = _sys()
     try:
-        from spectrometer.gui.worker import HardwareWorker
-        w = HardwareWorker(s)
+        from spectrometer.gui.aux_worker import AuxWorker
+        w = AuxWorker(s)
         errors: list[str] = []
         w.error.connect(errors.append)
 

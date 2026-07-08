@@ -14,16 +14,21 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def _worker(system):
-    from spectrometer.gui.worker import HardwareWorker
-    return HardwareWorker(system)
+def _acq_worker(system):
+    from spectrometer.gui.worker import AcquisitionWorker
+    return AcquisitionWorker(system)
+
+
+def _aux_worker(system):
+    from spectrometer.gui.aux_worker import AuxWorker
+    return AuxWorker(system)
 
 
 def test_disconnect_keeps_poll_alive_and_reconnect(qapp):
     sys = build_system(dummy=True)
     sys.open_all()
     try:
-        w = _worker(sys)
+        w = _acq_worker(sys)
         snaps = []
         w.status_updated.connect(snaps.append)   # same thread -> synchronous
 
@@ -56,7 +61,7 @@ def test_camera_offline_blocks_acquire_and_defaults(qapp):
     sys = build_system(dummy=True)
     sys.open_all()
     try:
-        w = _worker(sys)
+        w = _acq_worker(sys)
         snaps = []
         w.status_updated.connect(snaps.append)
 
@@ -74,7 +79,7 @@ def test_laser_offline_defaults_are_safe(qapp):
     sys = build_system(dummy=True)
     sys.open_all()
     try:
-        w = _worker(sys)
+        w = _aux_worker(sys)
         snaps = []
         w.status_updated.connect(snaps.append)
 
@@ -116,7 +121,7 @@ def test_vacuum_pump_status_in_snapshot(qapp):
     sys = build_system(dummy=True)
     sys.open_all()
     try:
-        w = _worker(sys)
+        w = _aux_worker(sys)
         snaps = []
         w.status_updated.connect(snaps.append)
         w._poll_status()
@@ -136,7 +141,7 @@ def test_unknown_device_emits_error(qapp):
     sys = build_system(dummy=True)
     sys.open_all()
     try:
-        w = _worker(sys)
+        w = _acq_worker(sys)
         errors = []
         w.error.connect(errors.append)
         w.connect_device("teleporter")

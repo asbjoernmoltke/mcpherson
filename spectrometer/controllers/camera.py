@@ -70,6 +70,7 @@ class CameraController(Controller):
         self.cooling_fan_mode = cooling_fan_mode
         self._abort = abort or threading.Event()
         self.last_frame_saturated = False
+        self._is_cold_cached = False
 
     # --- cooling fan (manual) -----------------------------------------
     @property
@@ -109,6 +110,19 @@ class CameraController(Controller):
                     and self.driver.get_temperature() < self.warm_target_c)
         except Exception:  # pragma: no cover - hardware dependent
             return False
+
+    def refresh_cold_cache(self) -> bool:
+        """Refresh ``is_cold_cached`` from a live driver read. Called once per
+        status-poll cycle by whichever thread owns the camera driver, so
+        other threads can consult the cache without touching the driver
+        (the Andor SDK object is thread-confined, unlike the serial devices
+        which are protected by ``SafeSerial``'s per-port lock)."""
+        self._is_cold_cached = self.is_cold
+        return self._is_cold_cached
+
+    @property
+    def is_cold_cached(self) -> bool:
+        return self._is_cold_cached
 
     def is_at_frost_risk(self) -> bool:
         """True when the cooler is on and the sensor is colder than the current

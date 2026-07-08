@@ -94,8 +94,8 @@ def qapp():
 
 
 def _worker(system):
-    from spectrometer.gui.worker import HardwareWorker
-    return HardwareWorker(system)
+    from spectrometer.gui.worker import AcquisitionWorker
+    return AcquisitionWorker(system)
 
 
 def test_record_single_scan_writes_csv(qapp, tmp_path):

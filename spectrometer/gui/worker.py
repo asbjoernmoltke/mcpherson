@@ -1,15 +1,25 @@
-"""Hardware worker thread.
+"""Acquisition worker thread: camera + grating + shutter.
 
-All blocking device operations (scans, single grabs, cooldown, warm-up) and
-periodic status polling run on a single dedicated QThread, so the GUI thread
-never blocks on hardware. The engine's plain callbacks are marshalled to the
-GUI thread by emitting Qt signals from this worker (Qt queues them across the
-thread boundary).
+All blocking device operations for these three devices (scans, single grabs,
+cooldown, warm-up, homing) and their status polling run on a single
+dedicated QThread, so the GUI thread never blocks on hardware. The engine's
+plain callbacks are marshalled to the GUI thread by emitting Qt signals from
+this worker (Qt queues them across the thread boundary).
 
-The E-stop is intentionally *not* routed through this worker's event loop: it
-is invoked directly so it stays responsive even while a scan is blocking this
-thread. The shutter/laser/grating-stop calls it makes are fast and use
-channels independent of the in-progress grating transaction.
+The laser and vacuum gauge are on independent serial ports with no coupling
+to the camera/grating, so their commands and status polling live on a
+separate ``AuxWorker`` (see ``aux_worker.py``) instead of sharing this
+thread -- otherwise a long ``do_home``/``do_scan`` here would starve laser
+commands and the vacuum reading, queued behind it on the same event loop.
+The manual shutter toggle stays on *this* thread even though it might look
+independent: it shares the shutter driver with ``SoftwareSync`` (which
+brackets the camera's exposure window), so it must stay serialized with
+acquisition, not split off.
+
+The E-stop is intentionally *not* routed through either worker's event loop:
+it is invoked directly on the GUI thread so it stays responsive even while a
+scan is blocking this thread. The shutter/laser/grating-stop calls it makes
+are fast and use channels independent of the in-progress grating transaction.
 """
 from __future__ import annotations
 
@@ -17,15 +27,15 @@ import threading
 import time
 
 import numpy as np
-from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
+from PyQt6.QtCore import QCoreApplication, QObject, QTimer, pyqtSignal, pyqtSlot
 
-from ..core.exceptions import EStopActive, InterlockError, SpectrometerError
+from ..core.exceptions import EStopActive, SpectrometerError
 from ..core import storage
 from ..core.system import System
 from ..utilities import log
 
 
-class HardwareWorker(QObject):
+class AcquisitionWorker(QObject):
     # data / progress (emitted from engine callbacks, queued to GUI thread)
     frame_ready = pyqtSignal(object)
     spectrum_ready = pyqtSignal(object, object)
@@ -49,6 +59,13 @@ class HardwareWorker(QObject):
         self._busy = False
         self._warming = False           # non-blocking warm-up in progress
         self._live_stop = threading.Event()
+        # True only while do_live's loop is the thing occupying this thread.
+        # Kept distinct from ``_busy`` (which just means "some long op is
+        # running") even though the two are always equal in practice today --
+        # only do_live pumps this thread's event queue mid-operation (see
+        # do_live below), so it's the only state that needs its own flag for
+        # the live-specific guard/pause-resume logic.
+        self._live_active = False
 
         eng = system.engine
         eng.on_frame = self.frame_ready.emit
@@ -78,11 +95,17 @@ class HardwareWorker(QObject):
     def _poll_status(self) -> None:
         """Build the status snapshot defensively: each device's section is
         guarded by its connection state so an offline (or failing) device
-        reports 'offline' rather than breaking the whole poll."""
+        reports 'offline' rather than breaking the whole poll.
+
+        Covers camera/grating/shutter only -- laser and vacuum are polled by
+        ``AuxWorker`` on its own thread. ``check_frost_risk`` stays here (it
+        needs the camera driver, which is thread-confined to this worker) but
+        reads the vacuum's frost point as a plain cached attribute rather
+        than polling the gauge itself."""
         s = self.system
         d = s.devices
         try:
-            keys = ("camera", "grating", "shutter", "laser", "vacuum")
+            keys = ("camera", "grating", "shutter")
             conn = {k: getattr(d, k).is_connected for k in keys}
             # A Dummy stand-in (e.g. the shutter, which has no real driver yet)
             # is flagged 'simulated' so the GUI doesn't show it as real hardware.
@@ -92,39 +115,10 @@ class HardwareWorker(QObject):
                     "estopped": s.safety.is_estopped,
                     "busy": self._busy, "warming": self._warming}
 
-            # vacuum first (the cooling interlock depends on it)
-            if conn["vacuum"]:
-                try:
-                    s.vacuum.poll()
-                    s.safety.check_frost_risk()
-                    alerts = s.safety.check_pump_health()
-                    snap.update(vacuum=s.vacuum.status,
-                                frost_point=s.vacuum.frost_point_c,
-                                min_safe_setpoint=s.camera.min_safe_setpoint_c(),
-                                vacuum_turbo=s.vacuum.turbo_state,
-                                vacuum_backing=s.vacuum.backing_state,
-                                turbo_running=s.vacuum.turbo_running,
-                                backing_running=s.vacuum.backing_running,
-                                turbo_standby=s.vacuum.turbo_standby,
-                                vacuum_alerts=alerts,
-                                vacuum_can_control=s.vacuum.supports_control)
-                except Exception as exc:
-                    log.error("Vacuum poll failed: %s" % exc)
-                    snap.update(vacuum="error", frost_point=None,
-                                min_safe_setpoint=None, vacuum_turbo=None,
-                                vacuum_backing=None, turbo_running=False,
-                                backing_running=False, turbo_standby=False,
-                                vacuum_alerts=["Vacuum poll failed"],
-                                vacuum_can_control=False)
-            else:
-                snap.update(vacuum="offline", frost_point=None,
-                            min_safe_setpoint=None, vacuum_turbo=None,
-                            vacuum_backing=None, turbo_running=False,
-                            backing_running=False, turbo_standby=False,
-                            vacuum_alerts=[], vacuum_can_control=False)
-
             if conn["camera"]:
                 self._drive_warmup()        # non-blocking warm-up state machine
+                s.camera.refresh_cold_cache()   # so AuxWorker can read it safely
+                s.safety.check_frost_risk()     # reads vacuum's cached pressure
                 snap.update(
                     camera=s.camera.status, temperature=s.camera.temperature,
                     cooler_on=d.camera.is_cooler_on(),
@@ -150,34 +144,6 @@ class HardwareWorker(QObject):
             else:
                 snap.update(shutter="offline", shutter_open=False)
 
-            if conn["laser"]:
-                snap.update(
-                    laser=s.laser.status, laser_on=s.laser.is_enabled,
-                    laser_stage=s.laser.emission_stage,
-                    laser_state=s.laser.emission_state,
-                    laser_supports_listen=s.laser.supports_listen,
-                    laser_power=s.laser.read_power_percent(),
-                    laser_energy=s.laser.read_pulse_energy_uj(),
-                    laser_energy_measured=s.laser.read_measured_pulse_energy_uj(),
-                    laser_energy_max=s.laser.max_pulse_energy_uj,
-                    laser_supports_energy=s.laser.supports_energy,
-                    laser_pp_ratio=s.laser.read_pulse_picker_ratio(),
-                    laser_rep_rate=s.laser.read_repetition_rate_hz(),
-                    laser_supports_power=s.laser.supports_power,
-                    laser_supports_pp=s.laser.supports_pulse_picker,
-                    laser_supports_rep=s.laser.supports_rep_rate,
-                    laser_allowed_rep_rates=s.laser.allowed_rep_rates_hz())
-            else:
-                snap.update(
-                    laser="offline", laser_on=False, laser_stage="--",
-                    laser_state="--", laser_supports_listen=False,
-                    laser_power=None, laser_energy=None,
-                    laser_energy_measured=None, laser_energy_max=None,
-                    laser_supports_energy=False,
-                    laser_pp_ratio=None, laser_rep_rate=None,
-                    laser_supports_power=False, laser_supports_pp=False,
-                    laser_supports_rep=False, laser_allowed_rep_rates=None)
-
             self.status_updated.emit(snap)
         except Exception as exc:  # pragma: no cover - defensive
             log.error("Status poll failed: %s" % exc)
@@ -185,6 +151,10 @@ class HardwareWorker(QObject):
     # --- connection management ----------------------------------------
     @pyqtSlot(str)
     def connect_device(self, key: str) -> None:
+        # Only ever reached with camera/grating/shutter keys (main_window.py
+        # routes laser/vacuum to AuxWorker), so guard unconditionally.
+        if self._refuse_if_live("reconnecting a device"):
+            return
         dev = getattr(self.system.devices, key, None)
         if dev is None:
             self.error.emit("Unknown device: %s" % key)
@@ -197,6 +167,8 @@ class HardwareWorker(QObject):
 
     @pyqtSlot(str)
     def disconnect_device(self, key: str) -> None:
+        if self._refuse_if_live("disconnecting a device"):
+            return
         dev = getattr(self.system.devices, key, None)
         if dev is None:
             self.error.emit("Unknown device: %s" % key)
@@ -212,8 +184,52 @@ class HardwareWorker(QObject):
         self._busy = busy
         self.busy_changed.emit(busy)
 
+    def _refuse_if_live(self, what: str) -> bool:
+        """Guard for every long-op/state-changing slot except the camera
+        config setters. Load-bearing, not just defense-in-depth: do_live's
+        loop calls QCoreApplication.processEvents() (see do_live) so this
+        thread's other queued slots -- including this one -- get dispatched
+        cooperatively (still single-threaded; no new concurrency) while live
+        view runs. Neither the grating Home/Stop buttons nor the Shutter
+        Open/Close buttons are disabled in the GUI while busy, so without
+        this guard they would actually reach the driver mid-stream instead
+        of just queuing harmlessly as they did before processEvents()."""
+        if self._live_active:
+            self.error.emit(
+                "Stop live view first (%s unavailable while live)." % what)
+            return True
+        return False
+
+    def _configure_camera(self, **kwargs) -> None:
+        """Apply camera acquisition settings, pausing/resuming live view's
+        acquisition around the call if it's active. Real Andor SDK2 hardware
+        generally requires the camera to be idle to change exposure/trigger/
+        readout-rate/preamp/EM-gain; DummyCamera's start/stop_acquisition are
+        free flag flips, so this is a no-op cost outside live view."""
+        cam = self.system.camera.driver
+        live = self._live_active
+        if live:
+            try:
+                cam.stop_acquisition()
+            except Exception:
+                pass
+        try:
+            self.system.camera.configure(**kwargs)
+        finally:
+            if live:
+                try:
+                    cam.start_acquisition()
+                except Exception as exc:
+                    # Restart failed -- don't let do_live spin silently on a
+                    # dead acquisition with no user-visible signal.
+                    self.error.emit("Live view could not resume after "
+                                    "applying the setting: %s" % exc)
+                    self._live_stop.set()
+
     @pyqtSlot(float)
     def do_cooldown(self, setpoint_c: float) -> None:
+        if self._refuse_if_live("cooldown"):
+            return
         self._warming = False           # a new cooldown cancels any warm-up
         try:
             self.system.safety.assert_can_cool()
@@ -226,6 +242,8 @@ class HardwareWorker(QObject):
         """Begin a controlled warm-up. Non-blocking: the cooler is raised to
         the warm target now and switched off later by ``_drive_warmup`` once
         the sensor is warm, so the GUI/status keep updating throughout."""
+        if self._refuse_if_live("warm-up"):
+            return
         try:
             self.system.camera.begin_warmup()
             self._warming = True
@@ -242,6 +260,8 @@ class HardwareWorker(QObject):
 
     @pyqtSlot()
     def do_home(self) -> None:
+        if self._refuse_if_live("home"):
+            return
         self._set_busy(True)
         try:
             self.system.grating.home()
@@ -252,6 +272,8 @@ class HardwareWorker(QObject):
     def set_grating(self, grating_name: str) -> None:
         """Declare the installed grating -> swap its calibration. Queued to the
         worker thread, so it can't race a running scan (which blocks here)."""
+        if self._refuse_if_live("grating change"):
+            return
         try:
             self.system.set_grating(grating_name)
         except Exception as exc:
@@ -259,6 +281,8 @@ class HardwareWorker(QObject):
 
     @pyqtSlot(float)
     def do_goto_wavelength(self, wavelength_nm: float) -> None:
+        if self._refuse_if_live("go-to-wavelength"):
+            return
         self._set_busy(True)
         try:
             self.system.grating.move_to_wavelength(wavelength_nm)
@@ -269,6 +293,8 @@ class HardwareWorker(QObject):
 
     @pyqtSlot()
     def do_single(self) -> None:
+        if self._refuse_if_live("single capture"):
+            return
         self._set_busy(True)
         try:
             self.system.engine.single()
@@ -279,6 +305,8 @@ class HardwareWorker(QObject):
 
     @pyqtSlot(float, float)
     def do_scan(self, wl_min: float, wl_max: float) -> None:
+        if self._refuse_if_live("scan"):
+            return
         self._set_busy(True)
         try:
             self.system.engine.scan(wl_min, wl_max)
@@ -296,7 +324,18 @@ class HardwareWorker(QObject):
         """Continuous preview: open the shutter, stream the camera's newest
         frame (and its reduced spectrum) until stopped, then close up. Runs on
         the worker thread; ``stop_live`` (called from the GUI thread) ends it,
-        as does an E-stop/abort."""
+        as does an E-stop/abort.
+
+        The loop calls ``QCoreApplication.processEvents()`` each iteration so
+        this thread's own queued slots -- the six camera-config setters, and
+        the status-poll QTimer's tick -- get dispatched cooperatively instead
+        of being stuck behind this loop until it returns. This is still
+        single-threaded re-entrancy, not real concurrency: processEvents()
+        just lets Qt drain this same thread's pending queued calls, nested in
+        this call stack, one at a time, then returns here. Every OTHER long
+        op/state-changing slot (do_home, do_scan, set_shutter, ...) guards
+        itself with ``_refuse_if_live`` so it can't actually run nested in
+        here even though it may now get dispatched rather than just queuing."""
         from ..core.acquisition import reduce_frames
         if self._busy:
             self.error.emit("Busy; stop the current operation first.")
@@ -305,6 +344,7 @@ class HardwareWorker(QObject):
         self._live_stop.clear()
         self.system.abort.clear()
         self._set_busy(True)
+        self._live_active = True
         cam = self.system.camera.driver
         try:
             self.system.shutter.open()
@@ -318,6 +358,7 @@ class HardwareWorker(QObject):
                     wl = self.system.calibration.wavelength_axis(
                         self.system.grating.position)
                     self.spectrum_ready.emit(wl, reduce_frames(img))
+                QCoreApplication.processEvents()
                 self._live_stop.wait(0.03)   # ~30 fps, interruptible
         except Exception as exc:
             self.error.emit("Live view failed: %s" % exc)
@@ -327,6 +368,7 @@ class HardwareWorker(QObject):
             except Exception:  # pragma: no cover
                 pass
             self.system.shutter.close()
+            self._live_active = False
             self._set_busy(False)
             self.live_stopped.emit()
 
@@ -338,6 +380,8 @@ class HardwareWorker(QObject):
     # --- recording (data saving) --------------------------------------
     @pyqtSlot(object)
     def do_record(self, opts: storage.SaveOptions) -> None:
+        if self._refuse_if_live("recording"):
+            return
         self._set_busy(True)
         self.system.abort.clear()       # fresh run
         try:
@@ -450,12 +494,21 @@ class HardwareWorker(QObject):
                 rec.close()
         return (base + ".h5") if not csv else (base + "_*.csv")
 
+    # These six deliberately do NOT call _refuse_if_live -- they're exactly
+    # the settings that should keep working while live view streams (that's
+    # the point of this fix). _configure_camera pauses/resumes acquisition
+    # around the actual driver call when live is active.
     @pyqtSlot(float)
     def set_exposure(self, seconds: float) -> None:
-        self.system.camera.configure(exposure_s=seconds)
+        try:
+            self._configure_camera(exposure_s=seconds)
+        except Exception as exc:
+            self.error.emit("Exposure failed: %s" % exc)
 
     @pyqtSlot(bool)
     def set_camera_fan(self, on: bool) -> None:
+        # Fan/cooler control isn't an acquisition parameter -- no need to
+        # pause acquisition, so this bypasses _configure_camera.
         try:
             self.system.camera.set_fan(on)
         except Exception as exc:
@@ -465,112 +518,51 @@ class HardwareWorker(QObject):
     @pyqtSlot(str)
     def set_trigger_mode(self, mode: str) -> None:
         try:
-            self.system.camera.configure(trigger_mode=mode)
+            self._configure_camera(trigger_mode=mode)
         except Exception as exc:
             self.error.emit("Trigger mode failed: %s" % exc)
 
     @pyqtSlot(str)
     def set_internal_shutter(self, mode: str) -> None:
         try:
-            self.system.camera.configure(internal_shutter=mode)
+            self._configure_camera(internal_shutter=mode)
         except Exception as exc:
             self.error.emit("Internal shutter failed: %s" % exc)
 
     @pyqtSlot(int)
     def set_readout_rate(self, index: int) -> None:
         try:
-            self.system.camera.configure(readout_index=index)
+            self._configure_camera(readout_index=index)
         except Exception as exc:
             self.error.emit("Readout rate failed: %s" % exc)
 
     @pyqtSlot(int)
     def set_preamp_gain(self, index: int) -> None:
         try:
-            self.system.camera.configure(preamp_index=index)
+            self._configure_camera(preamp_index=index)
         except Exception as exc:
             self.error.emit("Pre-amp gain failed: %s" % exc)
 
     @pyqtSlot(int)
     def set_em_gain(self, value: int) -> None:
         try:
-            self.system.camera.configure(em_gain=value)
+            self._configure_camera(em_gain=value)
         except Exception as exc:
             self.error.emit("EM gain failed: %s" % exc)
 
     @pyqtSlot(bool)
-    def set_turbo(self, on: bool) -> None:
-        v = self.system.vacuum
-        try:
-            if not on:
-                # Stopping the turbo auto-vents -- block while the camera is cold.
-                self.system.safety.assert_can_stop_pumping()
-            (v.turbo_on if on else v.turbo_off)()
-        except Exception as exc:
-            self.error.emit(str(exc))
-        self._poll_status()
-
-    @pyqtSlot(bool)
-    def set_backing(self, on: bool) -> None:
-        v = self.system.vacuum
-        try:
-            (v.backing_on if on else v.backing_off)()
-        except Exception as exc:
-            self.error.emit(str(exc))
-        self._poll_status()
-
-    @pyqtSlot(bool)
-    def set_turbo_standby(self, on: bool) -> None:
-        v = self.system.vacuum
-        try:
-            if on:
-                # Standby lets pressure drift up -- block while the camera is cold.
-                self.system.safety.assert_can_stop_pumping()
-            (v.turbo_standby_on if on else v.turbo_standby_off)()
-        except Exception as exc:
-            self.error.emit(str(exc))
-        self._poll_status()
-
-    @pyqtSlot(bool)
     def set_shutter(self, open_: bool) -> None:
+        # Manual toggle: stays on this thread (not AuxWorker) because it
+        # shares the shutter driver with SoftwareSync, which brackets the
+        # camera's exposure window during do_single/do_scan. Guarded against
+        # live view too: do_live owns the shutter (open for the whole
+        # session), so a manual toggle mid-stream would fight it.
+        if self._refuse_if_live("manual shutter toggle"):
+            return
         if open_:
             self.system.shutter.open()
         else:
             self.system.shutter.close()
-
-    @pyqtSlot(bool)
-    def set_laser(self, enabled: bool) -> None:
-        if enabled:
-            self.system.laser.enable()
-        else:
-            self.system.laser.disable()
-
-    @pyqtSlot()
-    def set_laser_listen(self) -> None:
-        try:
-            self.system.laser.listen()
-        except Exception as exc:
-            self.error.emit(str(exc))
-
-    @pyqtSlot(float)
-    def set_laser_energy(self, energy_uj: float) -> None:
-        try:
-            self.system.laser.set_pulse_energy_uj(energy_uj)
-        except Exception as exc:
-            self.error.emit(str(exc))
-
-    @pyqtSlot(int)
-    def set_pulse_picker(self, ratio: int) -> None:
-        try:
-            self.system.laser.set_pulse_picker_ratio(ratio)
-        except Exception as exc:
-            self.error.emit(str(exc))
-
-    @pyqtSlot(float)
-    def set_rep_rate(self, hz: float) -> None:
-        try:
-            self.system.laser.set_repetition_rate_hz(hz)
-        except Exception as exc:
-            self.error.emit(str(exc))
 
 
 # --- per-scan writers: translate the a/b/c content flags to storage calls ---
