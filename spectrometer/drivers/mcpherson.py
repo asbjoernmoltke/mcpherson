@@ -114,6 +114,12 @@ class MP_789A_4(GratingDriver):
         # It will be the only thing which calls the internal _is_moving() function.
         # The middleware calls the external is_moving() function.
         # This way we can ensure that the device is only queried for movement status when it is safe to do so.
+        #
+        # This ticks every 0.25s for as long as the grating is connected, so
+        # its routine per-tick status is logged at DEBUG (visible with
+        # --verbose) rather than INFO -- at INFO it drowned the console/log
+        # file in a repeating line even while completely idle, making the app
+        # look like it was stuck on a never-finishing task.
 
         while not self._watchdog_stop.is_set():
             time.sleep(0.25)
@@ -123,20 +129,17 @@ class MP_789A_4(GratingDriver):
             if axis_moving:
                 # Check if the backlash lock is active. If so, we should check again later.
                 if self._backlash_lock:
-                    # log.info('Backlash lock is active. Skipping movement inquiry.')
-                    log.info('Backlash lock is active, but not skipping movement inquiry.')
-
-                    # continue
+                    log.debug('Backlash lock is active, but not skipping movement inquiry.')
 
                 # Update the movement status of the axis which is moving.
-                log.info('Checking movement status of axis.')
+                log.debug('Checking movement status of axis.')
                 self._moving = self._is_moving()
-                log.info(f'Axis is moving? {self._moving}.')
+                log.debug(f'Axis is moving? {self._moving}.')
 
             # Checking for movement in this last case isn't necessary because we know when we initiate an axis move - it should be set to True (moving) when its told to move. The assumption should be that it does begin to move. Then, we use the previous case to prove it isn't moving once its stopped (or failed to start moving).
             elif not axis_moving:
                 # Update the movement status of all alive axes, since none are reported as moving.
-                log.info('Axis has not been marked or reported as moving. Skipping movement inquiry.')
+                log.debug('Axis has not been marked or reported as moving. Skipping movement inquiry.')
 
     def set_stage(self, stage):
         pass
